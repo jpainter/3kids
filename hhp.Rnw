@@ -1,0 +1,383 @@
+\documentclass{article}
+\usepackage[margin=1in]{geometry} % http://ctan.org/pkg/geometry
+%\usepackage{tabularx}% http://ctan.org/pkg/tabularx
+\usepackage{booktabs}% http://ctan.org/pkg/booktabs
+\usepackage{fixltx2e}
+\usepackage{setspace}
+\usepackage{relsize}
+\usepackage{booktabs} % for table formatting
+\usepackage[section]{placeins}  %% keeps output from floating into adjoining sections
+
+\begin{document}
+<<'setup', echo=FALSE, cache=FALSE, message=FALSE>>=
+opts_chunk$set(fig.align='center', fig.show='as.is', fig.width=6, fig.height=4,
+               message=FALSE, comment="", tidy=TRUE, 
+               echo=FALSE, 
+               results='asis',
+               cache=TRUE)
+library(xtable)
+library(tables)
+@
+
+\title{Heritage Provider Network Health Prize}
+\author{John Painter (3kids)}
+\maketitle
+\tableofcontents          
+\listoffigures
+\listoftables
+
+\section{Introduction}
+
+\section{Dataset}
+<<'import-save', eval=FALSE>>=
+# Load csv files:
+gethhp <- function (.sheet) {
+  dir = "C:/Users/bzp3/Desktop/Kaggle/HHP/HHP_release3/"
+  wb <- paste(dir, paste(.sheet,".CSV" , sep=""), sep="") 
+  read.csv(wb)
+}
+
+members = gethhp("Members")
+claims = gethhp("Claims")
+dihy2 = gethhp("DaysInHospital_Y2")
+dihy3 = gethhp("DaysInHospital_Y3")
+drug = gethhp("DrugCount")
+lab = gethhp("LabCount")
+conditions = gethhp("Lookup PrimaryConditionGroup")
+procedures = gethhp("Lookup ProcedureGroup")
+target = gethhp("Target")
+
+save(members, file="members.rda")
+save(claims, file="claims.rda")
+save(dihy2, file="dihy2.rda")
+save(dihy3, file="dihy3.rda")
+save(drug, file="drug.rda")
+save(lab, file="lab.rda")
+save(conditions, file="conditions.rda")
+save(procedures, file="procedures.rda")
+save(target, file="target.rda")
+@
+
+<<'load'>>=
+load("members.rda")
+load("claims.rda")
+load("dihy2.rda")
+load("dihy3.rda")
+load("drug.rda")
+load("lab.rda")
+load("conditions.rda")
+load("procedures.rda")
+load("target.rda")
+@
+
+<<'describe'>>=
+## @knitr describe
+library(Hmisc)
+library(xtable)
+
+latex(describe(members), append=TRUE, file="")
+latex(describe(claims), append=TRUE, file="")
+latex(describe(dihy2), append=TRUE, file="")
+latex(describe(dihy3), append=TRUE, file="")
+latex(describe(target), append=TRUE, file="")
+latex(describe(drug), append=TRUE, file="")
+latex(describe(lab), append=TRUE, file="")
+
+xtable(conditions)
+xtable(procedures)
+
+@
+
+<<'shared-rows'>>=
+count.rows <- function(x,y,v,all=FALSE){
+    tx <- table(x[[v]])
+    ty <- table(y[[v]])
+    val <- val <- names(tx)[match(names(tx),names(ty),0L) > 0L]
+    #cts <- rbind(tx[match(val,names(tx))],ty[match(val,names(ty))])
+    #colnames(cts) <- val
+    #sum(apply(cts,2,prod,na.rm=all),na.rm=TRUE)
+    length(val)
+}
+
+# create matrix of 
+ts = list(members, claims, dihy2, dihy3, drug, lab, target)
+     names(ts) = c("members", "claims", "dihy2", "dihy3", "drug", "lab", "target")
+     m = matrix(nrow=length(ts), ncol=length(ts))
+     member.count = as.data.frame(m)
+     row.names(member.count) = names(ts)
+     names(member.count) = names(ts)
+
+# Matrix of members in each table
+     for (i in 1:length(ts)) {
+          for (j in 1:length(ts)) {
+                    member.count [i,j]= count.rows(ts[[i]],ts[[j]],"MemberID")
+     }}
+
+library(xtable)
+xtable(prettyNum(member.count, big.mark = ","))
+@
+
+\subsection{Create Training Dataset}
+The first training set is created by joining dihy2 and dihy2 with members. This gives complete list of those with days in hospital (including those with no days) by Sex.
+
+\begin{itemize}
+     \item For lab and drug, calculate number of each per member by year
+     
+     \item join tables
+\end{itemize}
+
+<<'training-set'>>=
+# reshape drug and lab data to yield number of each per year per member
+library(plyr); library(reshape)
+
+# initial training has yearly totals...
+#  subsequent versions should include inpatient/outpatient, type, etc.
+drug.year = ddply(drug, .(MemberID, Year), summarize, drug.num = length(MemberID))
+drug.year.wide = cast(drug.year, MemberID ~ Year , value = "drug.num")
+
+lab.year = ddply(lab, .(MemberID, Year), summarize, lab.num = length(MemberID))
+lab.year.wide = cast(lab.year, MemberID ~ Year , value = "lab.num")
+
+claims.year = ddply(claims, .(MemberID, Year), summarize, claims.num = length(MemberID))
+claims.year.wide = cast(claims.year, MemberID ~ Year , value = "claims.num")
+
+# + hospital days
+d1 = merge(members, dihy2, by.x='MemberID', by.y='MemberID', all=TRUE)
+names(d1)[4:5] = c("ClaimsTruncatedY2", "DaysY2")
+
+d2 = merge(d1, dihy3, by.x='MemberID', by.y='MemberID', all=TRUE)
+names(d2)[6:7] = c("ClaimsTruncatedY3", "DaysY3")
+rm(d1)
+
+d3 = merge(d2, target, by.x='MemberID', by.y='MemberID', all=TRUE)
+names(d3)[8:9] = c("target.ClaimsTruncated","target.dihy")
+rm(d2)
+dihy = d3 ; rm(d3)
+
+# set "" level to "Unk"
+levels(dihy$Sex)[1] = "Unk"
+levels(dihy$AgeAtFirstClaim)[1] = "Unk"
+
+# + drugs
+mem.drug = merge(dihy, drug.year.wide, by.x='MemberID', by.y='MemberID', all=TRUE)
+names(mem.drug)[10:12] = c("drugY1", "drugY2", "drugY3")
+
+# + lab
+mem.drug.lab = merge(mem.drug, lab.year.wide, by.x='MemberID', by.y='MemberID', all=TRUE)
+names(mem.drug.lab)[13:15] = c("labY1", "labY2", "labY3")
+rm(mem.drug)
+
+# + claim
+mem.drug.lab.claim = merge(mem.drug.lab, claims.year.wide, by.x='MemberID', by.y='MemberID', all=TRUE)
+names(mem.drug.lab.claim)[16:18] = c("claimY1", "claimY2", "claimY3")
+rm(claims.year.wide)
+
+# final...
+mem.data = mem.drug.lab.claim; rm(mem.drug.lab.claim)
+
+# total days
+# dihy$days = ifelse(is.na(dihy$DaysY2), 0, dihy$DaysY2 ) + 
+#                  ifelse(is.na(dihy$DaysY3), 0, dihy$DaysY3)
+
+# membership and outcome data
+mem.data$y2 = ifelse( is.na(mem.data$ClaimsTruncatedY2) , 0 , 1)
+mem.data$y2 = factor(mem.data$y2)
+mem.data$y3 = ifelse( is.na(mem.data$ClaimsTruncatedY3) , 0 , 1)
+mem.data$y3 = factor(mem.data$y3)
+mem.data$target = ifelse( is.na(mem.data$target.ClaimsTruncated) , 0 , 1)
+mem.data$target = factor(mem.data$target)
+
+save(mem.data, file="mem.data.rda")
+load("mem.data.rda")
+@
+
+<<'membership'>>=
+
+t = tabular(data=dihy, 1 + y2   ~  (y3 + 1)* (n=1) )
+latex(t, caption="Data avialable for year2 versus year3")
+t = tabular(data=dihy, 1 +  y2  + y3  ~  (Heading("Target")*target + 1)* (n=1) )
+latex(t, caption="Data available for year2 and year3 versus target")
+
+# t=with(dihy, xtabs(~y2+y3+target))
+# latex(t, caption="Intersection of Data available for years 2 and 3 and target")
+@
+
+\section{Bivariate}
+Large numbers with missing age and sex.  Of these, few (none?) have days hospitalized.
+
+\subsection{days}
+<<'freqs-days'>>=
+
+t = table(dihy$days, dihy$DaysY2, useNA="always")
+# table produces rows with NA label; xtable needs character; convert NA to 'NA'
+rownames(t)[is.na(rownames(t))] <- "NA"
+colnames(t)[is.na(colnames(t))] <- "NA"
+xtable(t, caption="Missing days-year2?")
+
+t = table(dihy$days, dihy$DaysY3, useNA="always")
+# table produces rows with NA label; xtable needs character; convert NA to 'NA'
+rownames(t)[is.na(rownames(t))] <- "NA"
+colnames(t)[is.na(colnames(t))] <- "NA"
+xtable(t, caption="Missing days-year3?")
+@
+
+<<'plot-days', warning=FALSE>>=
+
+library(ggplot2)
+ggplot( data=dihy[dihy$days>0,], # for scale, remove those never hospitalized
+        aes(x=DaysY3) ) + 
+     geom_histogram()  + 
+     facet_grid(DaysY2 ~ .)
+
+ggplot( data=dihy[dihy$days>0 & !is.na(dihy$Sex),], # for scale, remove those never hospitalized
+        aes(x=DaysY3) ) + 
+     geom_density() +
+     facet_grid(DaysY2 ~ Sex)
+
+ggplot( data=dihy, aes(x=DaysY2, y=DaysY3) ) + 
+     geom_boxplot(aes(x=factor(dihy$DaysY2)))  + 
+     geom_smooth(aes(group=dihy$Sex, color=dihy$Sex))
+
+@
+
+\subsection{Sex}
+
+It appears as if there are more women (F=1; M=2) in each bin, but the desnities are fairly similar.  Having days in year 2 correlates weakly with year3. Women with 3-4 days are more likely to have days the next year; higher at 13-15 for men.
+
+The majority have zero days in both years.  May want to consider nested model: \newline
+A. who gets hospitalized
+B. if hospitalized, for how many days
+
+2777 with missing days hospitalized.  Why?
+
+Density in y3 higher for men hosp 8-9 days in y2 (less in y2=6?)
+
+
+<<'freqs-sex'>>=
+t = table(dihy$days, dihy$Sex, useNA="always")
+# table produces rows with NA label; xtable needs character; convert NA to 'NA'
+rownames(t)[is.na(rownames(t))] <- "NA"
+colnames(t)[is.na(colnames(t))] <- "NA" 
+xtable(t, caption="Missing days and Sex")
+
+@
+
+<<'plot-sex', warning=FALSE, fig.cap='Sex and Days Hospitalized'>>=
+library(reshape2)
+dihy.m = melt(dihy, value.name="days", measure = c("DaysY2", "DaysY3"), id=c("Sex"))
+     
+library(ggplot2)
+ggplot( data=dihy.m[dihy.m$days>0,], aes(x=days, fill=variable)) + 
+     geom_histogram() +
+     facet_grid( Sex ~ .) 
+
+ggplot( data=dihy.m[dihy.m$days>0,], aes(x=days), group=Sex) + 
+     geom_density(aes(color=Sex))
+
+# ggplot( data=dihy[dihy$days>0,], aes(x=Sex, y=days, group=Sex)) + 
+#      geom_boxplot(aes(color=Sex)) + geom_point(position="jitter")
+@
+
+Women have higher density for days 2-5 (delivery?) and men day 1 and 15. \newline
+
+<<'sex-lg'>>=
+sex.lr = glm( data=dihy, factor(days, ordered=TRUE) ~ Sex, family = "binomial")
+summary(sex.lr)
+
+#sigmoid function
+sigmoid = function(x){ (1+exp(-x))^-1 }
+
+# predicted response
+cruderisk = predict(sex.lr, newdata=data.frame(Sex=levels(dihy$Sex)), type="response")
+ 
+xtable( data.frame(
+     cbind(Sex=levels(dihy$Sex), cruderisk) ), 
+        caption="crude risk for days hospitalized by Sex (1=F)")
+@
+
+Women age 20-49 have more days hospitalized (delivery?)
+
+\subsection{Age}
+
+<<'freqs-age'>>=
+t = table(dihy$days, dihy$AgeAtFirstClaim, useNA="always")
+rownames(t)[is.na(rownames(t))] <- "NA"
+colnames(t)[is.na(colnames(t))] <- "NA"
+xtable(t, caption="Missing days and age")
+@
+
+<<'plot-age', fig.cap='Age and Days Hospitalized by Sex'>>=
+ggplot( data=dihy[dihy$days>0,], 
+        aes(x=AgeAtFirstClaim, y=days, fill=Sex)) + 
+     geom_boxplot() +
+     facet_grid( Sex ~ .) 
+@
+
+<<'age-lg'>>=
+age.lr = glm( data=dihy, factor(days, ordered=TRUE) ~ AgeAtFirstClaim , family = "binomial")
+summary(age.lr)
+
+#sigmoid function
+sigmoid = function(x){ (1+exp(-x))^-1 }
+
+# predicted response
+cruderisk = predict(age.lr, newdata=data.frame(AgeAtFirstClaim=levels(dihy$AgeAtFirstClaim)), type="response")
+
+xtable( data.frame( 
+               cbind(AgeAtFirstClaim=levels(dihy$AgeAtFirstClaim), cruderisk) ),
+        caption="crude risk for days hospitalized by AgeAtFirstClaim" )
+@
+
+\subsection{Age-Sex}
+<<"Age-Sex">>=
+age.sex.lr = glm( data=dihy, factor(days, ordered=TRUE) ~ AgeAtFirstClaim * Sex, family = "binomial")
+# age.sex.lr = glm( data=dihy, days ~ AgeAtFirstClaim * Sex, family = "poisson")
+summary(age.sex.lr)
+
+#sigmoid function
+sigmoid = function(x){ (1+exp(-x))^-1 }
+
+# predicted response
+predict.age.sex = predict(age.sex.lr, 
+                          newdata=data.frame(AgeAtFirstClaim=levels(dihy$AgeAtFirstClaim),
+                                               Sex=levels(dihy$Sex)), type="response")
+
+# xtable( data.frame( 
+#                cbind(AgeAtFirstClaim=levels(dihy$AgeAtFirstClaim), cruderisk) ),
+#         caption="crude risk for days hospitalized by AgeAtFirstClaim" )
+@
+
+Prepare first crude prediction...
+<<'initial-nnet'>>=
+load("mem.data.rda")
+# convert to all numeric
+
+
+library(caret)
+
+# sample
+sample = createDataPartition(mem.data[,"y3"], p=.8, list = FALSE) # 80% train
+training = mem.data[sample, c(4:6, 8, 10:18)]  # left out factor variables
+target = mem.data[sample, 7]
+
+# borrowing example from caret manual (p. 133)
+num.input = length(names(training))
+mygrid <- expand.grid(.decay=c(1, 0.0001), .size=c(2,3))
+nn.1 = train( training, target, method="nnet", 
+                   preProcess = c("center", "scale"), 
+#                    tuneLength = 3, tuneGrid=mygrid,
+                   maxit=10, trace=TRUE)
+
+err = function(true, pred) {
+  true = as.numeric(true)
+  pred = as.numeric(pred)
+  sqe = (true-pred)^2
+  sse = sqrt(sum(sqe))
+  sse
+}
+table( mem.data[-sample, "DaysY3"], predict(nn.1, mem.data[-sample, c(2:6,8:20)])
+err(iris[-samp,5], predict(train.mass, iris[-samp, 1:4]))
+
+@
+
+\end{document}
