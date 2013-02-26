@@ -126,11 +126,57 @@ The first training set is created by joining dihy2 and dihy2 with members. This 
      \item join tables
 \end{itemize}
 
+
 <<'training-set'>>=
 # reshape drug and lab data to yield number of each per year per member
 library(plyr); library(reshape)
 
+# <<<<<<< HEAD
 # initial training has yearly totals...
+# =======
+# # inintial training has yearly totals...
+# >>>>>>> c2b66170e9e068c35d46eec5ea50d64cc395c94f
+
+# expand claims to matrix with indicators for procdeures and conditions ...
+claim.matrix <- model.matrix(Year ~ MemberID  + 
+                                ProcedureGroup + 
+                                PrimaryConditionGroup +
+                                CharlsonIndex ,
+                              claims[,]) 
+claim.matrix = cbind(claim.matrix, claims$Year)
+colnames(claim.matrix)[68] = "Year"
+
+# summarise
+
+# library(plyr)
+# claims.m = as.data.frame(claim.matrix)
+# rm( claims, claim.matrix)
+# claims.matrix.sum = ddply(claims.m, .(MemberID, Year), numcolwise(sum))
+# str(claims.matrix.sum)
+
+claim.year1 = which(claim.matrix[,"Year"] == 1)
+claim.year2 = which(claim.matrix[,"Year"] == 2)
+claim.year3 = which(claim.matrix[,"Year"] == 3)
+
+claim.matrix.sum1 = rowsum(claim.matrix[claim.year1,], 
+                           claim.matrix[claim.year1,"MemberID"], na.rm=TRUE)
+claim.matrix.sum1[,"MemberID"] = as.numeric(rownames(claim.matrix.sum1))
+claim.matrix.sum1[,"Year"] = 1
+
+claim.matrix.sum2 = rowsum(claim.matrix[claim.year2,], 
+                           claim.matrix[claim.year2,"MemberID"], na.rm=TRUE)
+claim.matrix.sum2[,"MemberID"] = as.numeric(rownames(claim.matrix.sum2))
+claim.matrix.sum2[,"Year"] = 2
+
+claim.matrix.sum3 = rowsum(claim.matrix[claim.year3,], 
+                           claim.matrix[claim.year3,"MemberID"], na.rm=TRUE)
+claim.matrix.sum3[,"MemberID"] = as.numeric(rownames(claim.matrix.sum3))
+claim.matrix.sum3[,"Year"] = 3
+
+claim.matrix.sum = rbind(claim.matrix.sum1, claim.matrix.sum2, claim.matrix.sum3)
+save(claim.matrix.sum, file="claim.matrix.sum.rda")
+
+
 #  subsequent versions should include inpatient/outpatient, type, etc.
 drug.year = ddply(drug, .(MemberID, Year), summarize, drug.num = length(MemberID))
 drug.year.wide = cast(drug.year, MemberID ~ Year , value = "drug.num")
@@ -189,6 +235,21 @@ mem.data$target = factor(mem.data$target)
 
 save(mem.data, file="mem.data.rda")
 load("mem.data.rda")
+load("claim.matrix.sum.rda")
+
+# Data set for predicting Year 3 outcome (e.g. claimsY2); initially ignore data from Y1
+mem.cols = c("DaysY3" , "MemberID", "DaysY2", "AgeAtFirstClaim", "Sex", "drugY2", "labY2")
+data.y2 = mem.data[, mem.cols]
+claim.year = which(claim.matrix.sum[, "Year"] == 2)
+claims.y2 = as.data.frame(claim.matrix.sum[ claim.year,])
+
+# test merge
+# test.merge  = merge(data.y2[,"MemberID"], claims.y2[,"MemberID"], by="MemberID")
+
+data.y2 = merge(data.y2 , claims.y2, all.x=TRUE)
+str(data.y2)
+save(data.y2, file="data.y2.rda")
+
 @
 
 <<'membership'>>=
@@ -348,35 +409,240 @@ predict.age.sex = predict(age.sex.lr,
 @
 
 Prepare first crude prediction...
+<<<<<<< HEAD
 <<'initial-nnet'>>=
 load("mem.data.rda")
 # convert to all numeric
-
-
+  
 library(caret)
+# for predictors, convert factors to numeric
+  mem.data.nn = mem.data
+  factors = c("AgeAtFirstClaim", "Sex", "y2", "y3")
+  for (var in factors){
+    mem.data.nn[, var] = as.integer( mem.data[, var] )
+  }
+ 
+# Error function
+err = function(true, pred) {
+  true = as.numeric(true)
+  pred = as.numeric(pred)
+  sqe = na.omit((true-pred))^2
+  sse = sqrt(sum(sqe))
+  sse
+}
 
 # sample
-sample = createDataPartition(mem.data[,"y3"], p=.8, list = FALSE) # 80% train
-training = mem.data[sample, c(4:6, 8, 10:18)]  # left out factor variables
-target = mem.data[sample, 7]
+sample = createDataPartition(mem.data.nn[,"DaysY3"], p=.8, list = FALSE) # 80% train
+training.cols = c(2:6, 8, 10:20)
+training = mem.data.nn[sample, training.cols]  # left out factor variables
+target = factor(mem.data.nn[sample, 7], order=TRUE)
 
 # borrowing example from caret manual (p. 133)
 num.input = length(names(training))
-mygrid <- expand.grid(.decay=c(1, 0.0001), .size=c(2,3))
+mygrid <- expand.grid(.decay=c(3, 1, 0.3, 0.1, 0.03, 0.01, 0.003, 0.001, 0.0003, 0.0001), 
+                      .size=num.input)
+
+# initialize data frame for results
+tune = data.frame(iteration = NA, decay = NA, accuracy = NA, tune$accuracy.cv = NA,
+                  error = NA, 
+                  time = NA, convergence = NA)
+tuning = data.frame(iteration = NA, decay = NA, accuracy = NA, tune$accuracy.cv = NA,
+                    error = NA, 
+                    time = NA, convergence = NA)
+
+# training loop parameters
+learning.rates = c(3, 1, 0.3, 0.1, 0.03, 0.01, 0.003, 0.001, 0.0003, 0.0001)
+iterations = c(3, 10, 30, 100, 300, 1000, 3000, 10000)
+
+for (learning.rate in learning.rates){
+  mygrid <- expand.grid(.decay=learning.rate, 
+                      .size=num.input)
+  
+  for (iteration in iterations){
+nn.tune = train( training, target, method="nnet", 
+                 preProcess = c("center", "scale"), 
+                 entropy = TRUE , # nnet option
+                 tuneGrid=mygrid,
+                 trControl = trainControl(
+                   method = "boot",
+                   number = 10,
+                   p = 0.75,
+                   predictionBounds = rep(TRUE, 2)
+                   ),
+                 maxit=iteration, 
+                 trace=FALSE)
+
+e = err(mem.data.nn[-samp, "DaysY3"], 
+    predict(nn.tune, mem.data.nn[-samp, training.cols])
+)
+
+tune$iteration = iteration
+tune$decay = nn.tune$results[2]
+tune$accuracy = nn.tune$results[3]
+tune$accuracy.cv = NA
+tune$error = e
+tune$time = nn.tune$time$everything[[1]]
+tune$convergence = nn.tune$convergence
+tuning = rbind(tuning, tune)
+
+print(Sys.time())
+print(tuning)
+}  }
+
+table( mem.data.nn[-sample, "DaysY3"], predict(nn.tune, mem.data.nn[-sample, c(2:6, 8, 10:20)]) )
+
+time.start = Sys.time()
+mygrid <- expand.grid(.decay=c(1, 0.0001), .size=c(num.input))
 nn.1 = train( training, target, method="nnet", 
-                   preProcess = c("center", "scale"), 
-#                    tuneLength = 3, tuneGrid=mygrid,
-                   maxit=10, trace=TRUE)
+              preProcess = c("center", "scale"), 
+              tuneGrid=mygrid,
+              maxit=100, trace=TRUE)
+time.stop = Sys.time()
+nn.time =  time.stop - time.start 
 
 err = function(true, pred) {
   true = as.numeric(true)
   pred = as.numeric(pred)
-  sqe = (true-pred)^2
+  sqe = na.omit((true-pred))^2
   sse = sqrt(sum(sqe))
   sse
 }
-table( mem.data[-sample, "DaysY3"], predict(nn.1, mem.data[-sample, c(2:6,8:20)])
-err(iris[-samp,5], predict(train.mass, iris[-samp, 1:4]))
+table( mem.data.nn[-sample, "DaysY3"], predict(nn.1, mem.data.nn[-sample, c(2:6, 8, 10:20)]) )
+err(mem.data.nn[-samp, "DaysY3"], predict(nn.1, mem.data.nn[-samp, c(2:6, 8, 10:20)]))
+
+save(tuning, file="tuning.rda")
+
+# Get target submission
+targetX = merge(X, target[target$MemberID %in% unique(rownames(X)),])
+@
+
+<<'initial-neuralnet'>>=
+load("mem.data.rda")
+# convert to all numeric
+  
+library(caret)
+# for predictors, convert factors to numeric
+  mem.data.nn = mem.data
+  factors = c("AgeAtFirstClaim", "Sex", "y2", "y3")
+  for (var in factors){
+    mem.data.nn[, var] = as.integer( mem.data[, var] )
+  }
+ 
+# Error function
+err = function(true, pred) {
+  true = as.numeric(true)
+  pred = as.numeric(pred)
+  sqe = na.omit((true-pred))^2
+  sse = sqrt(sum(sqe))
+  sse
+}
+
+# sample
+sample = createDataPartition(mem.data.nn[,"DaysY3"], p=.8, list = FALSE) # 80% train
+training.cols = c(2:6, 8, 10:20)
+training = mem.data.nn[sample, training.cols]  # left out factor variables
+target = factor(mem.data.nn[sample, 7], order=TRUE)
+
+
+###########
+
+# borrowing example from caret manual (p. 133)
+num.input = length(names(training))
+mygrid <- expand.grid(.decay=c(3, 1, 0.3, 0.1, 0.03, 0.01, 0.003, 0.001, 0.0003, 0.0001), 
+                      .size=num.input)
+
+# initialize data frame for results
+tune.neuralnet = data.frame(iteration = NA, decay = NA, accuracy = NA, error = NA, 
+                            time = NA, convergence = NA)
+tuning.neuralnet = data.frame(iteration = NA, decay = NA, accuracy = NA, error = NA, 
+                              time = NA, convergence = NA)
+
+# training loop parameters
+learning.rates = c(3, 1, 0.3, 0.1, 0.03, 0.01, 0.003, 0.001, 0.0003, 0.0001)
+iterations = c(3, 10, 30, 100, 300, 1000, 3000, 10000)
+
+for (learning.rate in learning.rates){
+  mygrid <- expand.grid(.decay=learning.rate, 
+                      .size=num.input)
+  
+  for (iteration in iterations){
+neuralnet.tune = train( training, target, method="neuralnet", 
+                 preProcess = c("center", "scale"), 
+                 entropy = TRUE , # nnet option
+#                  tuneGrid=mygrid,
+                 trControl = trainControl(
+                   method = "boot",
+                   number = 10,
+                   p = 0.75,
+                   predictionBounds = rep(TRUE, 2)
+                   ),
+                 maxit=iteration, 
+                 trace=FALSE)
+
+e = err(mem.data.nn[-samp, "DaysY3"], 
+    predict(neuralnet.tune, mem.data.nn[-samp, training.cols])
+)
+
+tune.neuralnet$iteration = iteration
+tune.neuralnet$decay = neuralnet.tune$results[2]
+tune.neuralnet$accuracy = neuralnet.tune$results[3]
+tune.neuralnet$error = e
+tune.neuralnet$time = neuralnet.tune$time$everything[[1]]
+tune.neuralnet$convergence = neuralnet.tune$convergence
+tuning.neuralnet = rbind(tuning.neuralnet, tune.neuralnet)
+
+print(Sys.time())
+print(tuning.neuralnet)
+}  }
+
+@
+
+<<"Ng-Model">>=
+
+load("mem.data.rda")
+# convert to all numeric
+
+  # select cols
+  training.cols = c(2:6, 8, 10:20, 7) 
+  mem.data.nn = mem.data[, training.cols]
+
+library(caret)
+# for predictors, convert factors to numeric
+  factors = c("AgeAtFirstClaim", "Sex", "y2", "y3")
+  library(nnet) # class.ind()
+  for (var in factors){
+    mem.data.nn[, var] = as.integer( mem.data[, var] )
+  }
+
+# Impute
+  library(imputation)
+  mem.data.nn.i = kNNImpute(mem.data.nn[1:100,], 1)
+
+# sample
+sample = createDataPartition(mem.data.nn[,"DaysY3"], p=.8, list = FALSE) # 80% train
+training = mem.data.nn[sample, training.cols]  # left out factor variables
+target = factor(mem.data.nn[sample, 7], order=TRUE)
+
+data = na.omit(mem.data.nn[, c(training.cols, 7)])
+sample = createDataPartition(data[,"DaysY3"], p=.8, list = FALSE) # 80% train
+sub.sample = sample( sample, 1000, replace=FALSE)
+
+
+X = as.matrix(data[sample, 1:17])
+y = data[sample, "DaysY3"]
+num_levels = length(levels(factor(y)))
+test_cla <- nnet.train.cla(X, y, hidden_layer_size = num.input,
+                           lambda = 5, maxit = 100);
+print(Sys.time())
+
+X.test = as.matrix(data[-sample, 1:17])
+y.test = data[-sample, "DaysY3"]
+pred_cla <- nnet.predict.cla(test_cla$Theta1, test_cla$Theta2, X.test)
+                             
+plot(y.test, col = "green", pch = 15);
+points(pred_cla, col = "red", pch = 3);
+legend("topright", legend = c("Original", "Predicted"), 
+       pch = c(15, 3), col = c("green", "red"));
 
 @
 
