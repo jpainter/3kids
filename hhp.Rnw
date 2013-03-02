@@ -129,80 +129,125 @@ The first training set is created by joining dihy2 and dihy2 with members. This 
 
 <<'training-set'>>=
 # reshape drug and lab data to yield number of each per year per member
+
+## format data by member by year (i.e. norw ~= 3 x members)
+## insert rows in lab, claims, etc. when member exists but no value
+## when memeber exists in a year, but value for lab, or claims is NA, then set NA to 0
+
+
 library(plyr); library(reshape)
 
-# <<<<<<< HEAD
 # initial training has yearly totals...
 # =======
 # # inintial training has yearly totals...
-# >>>>>>> c2b66170e9e068c35d46eec5ea50d64cc395c94f
 
 # expand claims to matrix with indicators for procdeures and conditions ...
-claim.matrix <- model.matrix(Year ~ MemberID  + 
+# create dummy variables for Age, Sex
+
+  library(caret)
+  claim.dummy = dummyVars( ~ MemberID  + 
                                 ProcedureGroup + 
                                 PrimaryConditionGroup +
-                                CharlsonIndex ,
-                              claims[,]) 
-claim.matrix = cbind(claim.matrix, claims$Year)
-colnames(claim.matrix)[68] = "Year"
+                                CharlsonIndex, claims)
+  claim.matrix = predict(claim.dummy, newdata = claims)
+  claim.matrix = cbind(claim.matrix, claims$Year)
+  colnames(claim.matrix)[length(colnames(claim.matrix))] = "Year"
 
-# summarise
+  # split by year, summ number of claims, combine
 
-# library(plyr)
-# claims.m = as.data.frame(claim.matrix)
-# rm( claims, claim.matrix)
-# claims.matrix.sum = ddply(claims.m, .(MemberID, Year), numcolwise(sum))
-# str(claims.matrix.sum)
+  claim.year1 = which(claim.matrix[,"Year"] == 1)
+  claim.year2 = which(claim.matrix[,"Year"] == 2)
+  claim.year3 = which(claim.matrix[,"Year"] == 3)
+  
+  claim.matrix.sum1 = rowsum(claim.matrix[claim.year1,], 
+                             claim.matrix[claim.year1,"MemberID"], na.rm=TRUE)
+  claim.matrix.sum1[,"MemberID"] = as.numeric(rownames(claim.matrix.sum1))
+  claim.matrix.sum1[,"Year"] = 1
+  
+  claim.matrix.sum2 = rowsum(claim.matrix[claim.year2,], 
+                             claim.matrix[claim.year2,"MemberID"], na.rm=TRUE)
+  claim.matrix.sum2[,"MemberID"] = as.numeric(rownames(claim.matrix.sum2))
+  claim.matrix.sum2[,"Year"] = 2
+  
+  claim.matrix.sum3 = rowsum(claim.matrix[claim.year3,], 
+                             claim.matrix[claim.year3,"MemberID"], na.rm=TRUE)
+  claim.matrix.sum3[,"MemberID"] = as.numeric(rownames(claim.matrix.sum3))
+  claim.matrix.sum3[,"Year"] = 3
+  
+  claim.matrix.sum = rbind(claim.matrix.sum1, claim.matrix.sum2, claim.matrix.sum3)
+  save(claim.matrix.sum, file="claim.matrix.sum.rda")
+  load("claim.matrix.sum.rda")
+  nrow(claim.matrix.sum)  
 
-claim.year1 = which(claim.matrix[,"Year"] == 1)
-claim.year2 = which(claim.matrix[,"Year"] == 2)
-claim.year3 = which(claim.matrix[,"Year"] == 3)
-
-claim.matrix.sum1 = rowsum(claim.matrix[claim.year1,], 
-                           claim.matrix[claim.year1,"MemberID"], na.rm=TRUE)
-claim.matrix.sum1[,"MemberID"] = as.numeric(rownames(claim.matrix.sum1))
-claim.matrix.sum1[,"Year"] = 1
-
-claim.matrix.sum2 = rowsum(claim.matrix[claim.year2,], 
-                           claim.matrix[claim.year2,"MemberID"], na.rm=TRUE)
-claim.matrix.sum2[,"MemberID"] = as.numeric(rownames(claim.matrix.sum2))
-claim.matrix.sum2[,"Year"] = 2
-
-claim.matrix.sum3 = rowsum(claim.matrix[claim.year3,], 
-                           claim.matrix[claim.year3,"MemberID"], na.rm=TRUE)
-claim.matrix.sum3[,"MemberID"] = as.numeric(rownames(claim.matrix.sum3))
-claim.matrix.sum3[,"Year"] = 3
-
-claim.matrix.sum = rbind(claim.matrix.sum1, claim.matrix.sum2, claim.matrix.sum3)
-save(claim.matrix.sum, file="claim.matrix.sum.rda")
-
-
+## ====== Drug, Lab, total claims
 #  subsequent versions should include inpatient/outpatient, type, etc.
-drug.year = ddply(drug, .(MemberID, Year), summarize, drug.num = length(MemberID))
-drug.year.wide = cast(drug.year, MemberID ~ Year , value = "drug.num")
 
-lab.year = ddply(lab, .(MemberID, Year), summarize, lab.num = length(MemberID))
-lab.year.wide = cast(lab.year, MemberID ~ Year , value = "lab.num")
+  drug.year = ddply(drug, .(MemberID, Year), summarize, drug.num = length(MemberID))
+  drug.year.wide = cast(drug.year, MemberID ~ Year , value = "drug.num")
+  names(drug.year.wide) = c("MemberID", "DrugY1", "DrugY2", "DrugY3")
+  drugs.y = merge(members, drug.year.wide, all.x = TRUE)
+  
+  lab.year = ddply(lab, .(MemberID, Year), summarize, lab.num = length(MemberID))
+  lab.year.wide = cast(lab.year, MemberID ~ Year , value = "lab.num")
+  names(lab.year.wide) = c("MemberID", "LabY1", "LabY2", "LabY3")
+  labs.y = merge(members, lab.year.wide, all.x = TRUE)
 
-claims.year = ddply(claims, .(MemberID, Year), summarize, claims.num = length(MemberID))
-claims.year.wide = cast(claims.year, MemberID ~ Year , value = "claims.num")
+  claims.year = ddply(claims, .(MemberID, Year), summarize, claims.num = length(MemberID))
+  claims.year.wide = cast(claims.year, MemberID ~ Year , value = "claims.num")
+  names(claims.year.wide) = c("MemberID", "ClaimsY1", "ClaimsY2", "ClaimsY3")
+  claims.y = merge(members, claims.year.wide, all.x = TRUE)
+  
+  # combine
+  drug.lab = cbind(drugs.y, labs.y, claims.y)
+  names(drug.lab)
+  drug.lab = drug.lab[, c(1:6, 7:12, 14:18)]  # remove redundant columns
+  save(drug.lab, file = "drug.lab.rda")
+  nrow(drug.lab)
 
-# + hospital days
-d1 = merge(members, dihy2, by.x='MemberID', by.y='MemberID', all=TRUE)
-names(d1)[4:5] = c("ClaimsTruncatedY2", "DaysY2")
+# ====== hospital days
 
-d2 = merge(d1, dihy3, by.x='MemberID', by.y='MemberID', all=TRUE)
-names(d2)[6:7] = c("ClaimsTruncatedY3", "DaysY3")
-rm(d1)
+  d1 = merge(members, dihy2, by.x='MemberID', by.y='MemberID', all=TRUE)
+  names(d1)[4:5] = c("ClaimsTruncatedY2", "DaysY2")
+  
+  d2 = merge(d1, dihy3, by.x='MemberID', by.y='MemberID', all=TRUE)
+  names(d2)[6:7] = c("ClaimsTruncatedY3", "DaysY3")
+  rm(d1)
+  
+  d3 = merge(d2, target, by.x='MemberID', by.y='MemberID', all=TRUE)
+  names(d3)[8:9] = c("target.ClaimsTruncated","target.dihy")
+  rm(d2)
+  dihy = d3; rm(d3)
+  nrow(dihy)
 
-d3 = merge(d2, target, by.x='MemberID', by.y='MemberID', all=TRUE)
-names(d3)[8:9] = c("target.ClaimsTruncated","target.dihy")
-rm(d2)
-dihy = d3 ; rm(d3)
+# ===== Age and Sex 
 
 # set "" level to "Unk"
-levels(dihy$Sex)[1] = "Unk"
-levels(dihy$AgeAtFirstClaim)[1] = "Unk"
+  levels(dihy$Sex)[1] = "Unk"
+  levels(dihy$AgeAtFirstClaim)[1] = "Unk"
+
+# create dummy variables for Age, Sex
+  age.dummy = dummyVars( ~ AgeAtFirstClaim, data = dihy)
+  age.dummy.frame = predict(age.dummy, newdata = dihy)
+  head(age.dummy.frame)
+  
+  sex.dummy = dummyVars( ~ Sex, data = dihy)
+  sex.dummy.frame = predict(sex.dummy, newdata = dihy)
+  head(sex.dummy.frame)
+  sex.dummy.frame = sex.dummy.frame[, !(colnames(sex.dummy.frame) %in% "Sex.M")]
+
+  # combine age and sex
+  age.sex = cbind(age.dummy.frame, sex.dummy.frame)
+  save(age.sex, file = "age.sex.rda")
+  
+  # remove age and sex from dihy
+  dihy = dihy[, !names(dihy) %in% c("AgeAtFirstClaim", "Sex") ] 
+  save(dihy, file = "dihy.rda")
+  
+  
+
+# ========= Assemble data ...
+#   data = cbind( data, age.dummy.frame, sex.dummy.frame)
+#   rm(age.dummy.frame, sex.dummy.frame)
 
 # + drugs
 mem.drug = merge(dihy, drug.year.wide, by.x='MemberID', by.y='MemberID', all=TRUE)

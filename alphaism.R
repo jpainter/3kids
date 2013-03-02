@@ -17,25 +17,30 @@
 
 ## =============== random initialization ===============
 randInitializeWeights <- function(L_in, L_out) {
-  theta <- matrix(0, L_out, 1 + L_in);
-  epsilon_init <- 0.12;
-  theta <- matrix(rnorm(L_out*(L_in + 1)),
-                  L_out, (L_in + 1))*2*epsilon_init - epsilon_init;
-  return(theta);
+  #   theta <- matrix(0, L_out, 1 + L_in);
+  #   epsilon_init <- 0.12;
+  #   theta <- matrix(rnorm(L_out*(L_in + 1)),
+  #                   L_out, (L_in + 1))*2*epsilon_init - epsilon_init;
+  #   return(theta);
+   
+  epsilon_init = 0.12;
+  w = runif(matrix(rep(1, (L_out)*(1+ L_in)), ncol=1 + L_in))
+  W =  w * 2 * epsilon_init - epsilon_init 
+  return(W)
 }
 ## =============== sigmoid function ===============
 sigmoid <- function(z) {
-  g <- 1 / (1 + exp(-z));
+  g <- 1.0 / (1.0 + exp(-z));
   return(g);
 }
 ## =============== sigmoid gradient function ===============
 sigmoidGradient <- function(z) {
   g <- matrix(0, dim(z));
   g <- sigmoid(z);
-  g <- g * (1 -g);
+  g <- g * (1.0 -g);
+  ifelse( g==0, 1.0e-15, g)   # ensure that lower limit of g is positive 
   return(g);
 }
-
 
 # ++++++++++++++++++ absolute value predictor functions ++++++++++++++++++
 ## =============== cost J and gradient ===============
@@ -201,8 +206,13 @@ nnCostFunction.cla <- function(nn_params,
     # output layer
     z3 <- Theta2 %*% a2;
     a3 <- sigmoid(z3);
+    
+      ifelse( a3 == 0, 1.0e-15, a3)   # ensure that lower limit of a3 is positive 
+      oneMinusa3 = 1-a3
+      oneMinusa3 = ifelse( oneMinusa3 == 0, 1.0e-15, oneMinusa3 ) 
+     
     # add to cost function
-    J <- J + sum(-y_label * log(a3) - (1 - y_label) * log(1 - a3));
+    J <- J + sum(-y_label * log(a3) - (1 - y_label) * log(oneMinusa3));
     ## backward propagation
     delta3 <- a3 - y_label;
     delta2 <- (t(Theta2) %*% delta3)[-1] * sigmoidGradient(z2);
@@ -283,7 +293,7 @@ nnet.train.cla <- function(X, y, hidden_layer_size = 25,
                          lambda = lambda,
                          gr = gradFunction.cla,
                          method = "L-BFGS-B",
-                         control = list(maxit = maxit, trace = TRUE, REPORT = 10));
+                         control = list(maxit = maxit, trace = 1, REPORT = 10));
  
   nn_params <- train_results$par;
   Theta1 <- matrix(nn_params[1:(hidden_layer_size*(input_layer_size+1))],
