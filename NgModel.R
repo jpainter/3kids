@@ -20,11 +20,17 @@
         num.input = ncol(X.train)
         
         source('alphaism.R')
-        test_cla <- nnet.train.cla(X.train, y.train, 
+#         test_cla <- nnet.train.abs(X.train, y.train, 
+#                                    hidden_layer_size = layer.size.mulitplier * num.input,
+#                                    lambda = lambda, 
+#                                    maxit = maxit
+#                                    );
+        test_cla <- nnet.train.cla(X = X.train, y = y.train, 
                                    hidden_layer_size = layer.size.mulitplier * num.input,
                                    lambda = lambda, 
                                    maxit = maxit
-                                   );
+        );
+        
     
         # populate results
         results$model = model
@@ -35,26 +41,33 @@
         results$time = test_cla[4]
         results$cost = test_cla[5]
         results$accuracy = test_cla[6]
-        results$e = (sum((log(test_cla$pred + 1) - log(y.train+1))^2)/length(y.train))^0.5
+                
+        # hhp error rate.  because y is a factor, lowest value=1, so do not add 1 to value of y pred or actual
+        results$e = ( sum((log(test_cla$pred) - log(as.numeric(y.train)))^2)/length(y.train) )^0.5
         
         # table training results
         print(table(test_cla$pred, y.train))
         
         # table cross validation results
+#         y.levels = names(table(y.cv))
         pred_cla <- nnet.predict.cla(test_cla$Theta1, test_cla$Theta2, X.cv)
+#         pred.cv = factor(pred_cla, levels = as.numeric(y.levels), labels = y.levels)
+#         y.levels = table(y.cv) 
         print(table(pred_cla, y.cv))
         
         accuracy.cv = sum(pred_cla == y.cv)/length(pred_cla)*100
         cat("\nValidation Set Accuracy, model=", model, 
             ", factor=", as.character(layer.size.mulitplier * num.input), 
             ", lambda=", as.character(lambda), 
+            ", maxit=", as.character(maxit),
             ": ", accuracy.cv ,
             "%\n", sep = "");
         results$accuracy.cv = accuracy.cv
         results$ppv.cv = sum(pred_cla == y.cv)/as.integer(sum(pred_cla))*100
         results$sens.cv = sum(pred_cla == y.cv)/as.integer(sum(y.cv))*100
         results$F1.cv = 2*results$ppv.cv*results$sens.cv/as.integer((results$ppv.cv+results$sens.cv))
-        results$e.cv = (sum((log(results$ppv.cv + 1) - log(y.cv+1))^2)/length(y.cv))^0.5
+        
+        results$e.cv = (sum((log(pred_cla) - log(y.cv))^2)/length(y.cv))^0.5
         
         nn_params = c(c(test_cla$Theta1), c(test_cla$Theta2));
         cost.cv <- costFunction.cla(nn_params = nn_params ,
@@ -87,7 +100,6 @@ costVersusLambda <- function ( model = "X1",
       lambdas = costs$lambda
       factor = factor(costs$factor)
       
-      dev()
       library(ggplot2)
       g = ggplot( aes(x=lambdas), data=data.frame() )  +
         geom_point( aes(y = cost.train, pch = factor), size = 3, color = 'green' ) +

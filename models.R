@@ -2,95 +2,99 @@
 library(caret)
 
 ## ==================== Data
-  load("data.y2.rda")
-  data = data.y2
-  rm(data.y2)
-  
-  # limit to days >0
-  someDays = which(data$DaysY3 > 0)
-  data = data[someDays,]
+  load("dataY2.rda")
+  data1 = dataY2
+  rm(dataY2)
 
-  # create dummy variables for Age, Sex
-  age.dummy = dummyVars( ~ AgeAtFirstClaim, data = data)
-  age.dummy.frame = predict(age.dummy, newdata = data)
-  head(age.dummy.frame)
-  
-  sex.dummy = dummyVars( ~ Sex, data = data)
-  sex.dummy.frame = predict(sex.dummy, newdata = data)
-  head(sex.dummy.frame)
-#   sex.dummy.frame = sex.dummy.frame[, !(colnames(sex.dummy.frame) %in% "Sex.M")]
-  
-  data = cbind( data, age.dummy.frame, sex.dummy.frame)
-  rm(age.dummy.frame, sex.dummy.frame)
-  
-  # remove redundant or innapropriate columns
-  # skip MemberID, (Intercept), AgeAtFirstClaim, Sex, and Year
-  skipCols = c("Sex", "AgeAtFirstClaim", "(Intercept)","MemberID", "Year")
-  data= data[, !(names(data) %in% skipCols)]
-  
-  # Impute
-  #   library(imputation)
-  #   data.nn.i = kNNImpute(data.nn[1:100,], 1)
-  
-  # Change na to 0 ... seems accurate thing to do
-  data[is.na(data)] = 0
-  
-  # partition 
-  training.partition = createDataPartition(data[,"DaysY3"],
-                                           p=.8, list = FALSE) # 80% train
-  #   sample
-  sample.training = sample( training.partition, 2000, replace=FALSE)  
+# Factor Days3 into  days >0
+# limit to days >0
+  someDays = which(data1$DaysInHospital > 0)
+  data1 = data1[someDays,]
+  data1$someDays = factor(data1$DaysInHospital)
+  table(data1$someDays)
+
+# partition # 80% train
+  training.partition = createDataPartition(data1[,"someDays"],
+                                           p=.8, list = FALSE) 
+#   sample
+  sample.training1 = sample( training.partition, 3000, replace=FALSE)
+  t.all = table( data1[, "someDays"])
+  t.sample = table(data1[sample.training1, "someDays"])
+  t.sample
+  prop.table(t.sample)
+  prop.table(t.all)
+
   # all
   #   n = length(training.partition)
   #   sample.training = sample( training.partition, n, replace=FALSE)  
   # bootstrap
   #   sample.training = sample( training.partition, n, replace=TRUE)  
   
-  # select cols
-  training.cols = c(2:82) 
+# select cols
+  names(data1)
+  training.cols = c(3:90) 
 
-  # scale
-  preProcValues <- preProcess(data[, training.cols], method = c("center", "scale") )
-  #   data <- predict(preProcValues, data)
+# scale
+  preProcValues1 <- preProcess(data1[, training.cols], method = c("center", "scale") )
 
-  # set training and cv/test data
-  training = predict(preProcValues , data[sample.training, training.cols] ) 
-  training.target = data[sample.training, "DaysY3"] 
+# remove columns with zero variance
+  zero.var.cols1 =  c("ProcedureGroup.", "ProcedureGroup.ANES", "ProcedureGroup.SAS", "ProcedureGroup.SCS", 
+  "ProcedureGroup.SMCD", "ProcedureGroup.SMS", "ProcedureGroup.SNS", "ProcedureGroup.SO", 
+  "ProcedureGroup.SRS", "ProcedureGroup.SUS", "PrimaryConditionGroup.CANCRA", "PrimaryConditionGroup.CANCRM", 
+  "PrimaryConditionGroup.CATAST", "PrimaryConditionGroup.CHF", "PrimaryConditionGroup.FLaELEC", 
+  "PrimaryConditionGroup.HIPFX", "PrimaryConditionGroup.METAB1", "PrimaryConditionGroup.PERINTL", 
+  "PrimaryConditionGroup.PNCRDZ", "PrimaryConditionGroup.RENAL1", "PrimaryConditionGroup.RENAL2", 
+  "PrimaryConditionGroup.SEPSIS", "CharlsonIndex.3-4", "CharlsonIndex.5+")
   
-  test = predict(preProcValues , data[-sample.training, training.cols])
-  test.target = data[-sample.training, "DaysY3"]
-  
-  X = as.matrix(training)
-  y = as.matrix(training.target)
-  X.test = as.matrix(test[1:1000,])  # should try to randomize this with setseed/sample
-  y.test = as.matrix(test.target[1:1000])
+# set training and cv/test data
+  training1 = predict(preProcValues1 , data1[sample.training1, training.cols] ) 
+  training1.target = data[sample.training, "someDays"] 
+  table(training1.target)
+  # CV(test)
+  test1 = predict(preProcValues , data[-sample.training1, training.cols])
+  test1.target = data[-sample.training, "someDays"]
+  table(test1.target)
 
-  # clear memory space
-  rm(data, training, training.target, test, test.target)
+# update training columns
+  nonZero.cols1 = setdiff(names(data[,training.cols]), zero.var.cols1)
+  training1 = training1[, nonZero.cols1]
+  test1 = test1[, nonZero.cols1]
+
+  X = as.matrix(training1)
+  y = as.matrix(as.numeric(training1.target))
+  X.test = as.matrix(test1[1:2000,])  # should try to randomize this with setseed/sample
+  y.test = as.matrix(as.numeric(test1.target[1:2000]))
+  table(y.test)
+
+# clear memory space
+  rm(data1, training1, training1.target, test1, test1.target)
   source("NgModel.R")
 
-  layer.ms = 1  # c(1 , 3, 6, 9, 12)
-  lambdas =  10 # c(.01, .04, .16, .64, 1.2, 2.4, 4.8, 10, 20)
+  layer.ms = c(1,9) # c(1 , 3, 9 )
+  lambdas = c(0, 0.1, 1)
+  maxits = c(300)
+
 
 ## ===================== model X1
 ### 1st power feature set
 for (layer.m in layer.ms ){
   for (l in lambdas){
+    for (i in maxits){
     model.x1 =  nnNg(X.train= X, y.train= y,
                      layer.size.mulitplier = layer.m,
                      lambda = l,
-                     maxit = 300,
+                     maxit = i,
                      X.cv= X.test ,
                      y.cv= y.test,
                      model = "X1")
     
     # add results to table
-    if ( is.na(models)[1]){models = model.x1} else {
+    if ( !exists("models")){ models = model.x1$results} else {
       models = rbind(models, model.x1$results) }
-      save(models, file="models.rda")
-  }}
+    save(models, file="models.rda")
+  }}}
 
-c = costVersusLambda(results = models, model = "X1", factor = 1)
+costVersusLambda(results = models, model = "X1", factor = 1)
 accurayVersusLambda(results = models, model = "X1", factor = 1)
 
   ## ===================== model X2
@@ -109,15 +113,13 @@ for (layer.m in layer.ms ){
                        model = "X2")
   
       # add results to table
-      if ( is.na(models)[1]){models = model.x2} else {
-        models = rbind(models, model.x2) }
+      if ( !exists("models")){ models = model.x2$results} else {
+        models = rbind(models, model.x2$results) }
       save(models, file="models.rda")
     }}
 
-  costVersusLambda( results = models, model = "X1",  factor = 1)
-  costVersusLambda( results = models, model = "X2",  factor = 1)
-  costVersusLambda( results = models, model = "X3",  factor = 1)
-  accurayVersusLambda( results = models, model = "X2",  factor = 1)
+costVersusLambda(results = models, model = "X1", factor = 1)
+accurayVersusLambda(results = models, model = "X1", factor = 1)
    
   ## ===================== model X3
   ### 3rd power feature set
@@ -140,11 +142,6 @@ for (layer.m in layer.ms ){
       save(models, file="models.rda")
     }}
 
-  costVersusLambda(results = models, model = "X3",  factor = 1)
-  accurayVersusLambda(results = models, model = "X3",  factor = 1)
-  
-  #==== combine model results
-  models = rbind(model.x2, model.x3)
   
 
 

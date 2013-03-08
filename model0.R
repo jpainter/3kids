@@ -2,104 +2,100 @@
 library(caret)
 
 ## ==================== Data
-  load("data.y2.rda")
-  data = data.y2
-  rm(data.y2)
+  load("dataY2.rda")
+  data0 = dataY2
+  rm(dataY2)
 
 # Factor Days3 into quantiles for days >0
-  summary(data[data$DaysY3>0,"DaysY3"])
+  summary(data0[data0$DaysInHospital>0,"DaysInHospital"])
   # someDays = cut(data$DaysY3,
-  #                   breaks=c(0,1,3,6, 16), include.lowest=TRUE, ordered_result=TRUE)
-  someDays = cut(data$DaysY3,
-                 breaks=c(0, 1, 16), include.lowest=TRUE)
-  table(someDays)
-  data$DaysY3 = as.numeric(someDays)  # convert from 1,2 to 0,1
-  rm(someDays)
+  #                   breaks=c(0,1,3,6, 16), 
+  #                   include.lowest=TRUE, ordered_result=TRUE)
 
-# create dummy variables for Age, Sex
-  age.dummy = dummyVars( ~ AgeAtFirstClaim, data = data)
-  age.dummy.frame = predict(age.dummy, newdata = data)
-  head(age.dummy.frame)
-  
-  sex.dummy = dummyVars( ~ Sex, data = data)
-  sex.dummy.frame = predict(sex.dummy, newdata = data)
-  head(sex.dummy.frame)
-#   sex.dummy.frame = sex.dummy.frame[, !(colnames(sex.dummy.frame) %in% "Sex.M")]
+  data0$someDays = factor(
+                    ifelse(data0$DaysInHospital==0 & !is.na(data0$DaysInHospital), 0,
+                    ifelse(!is.na(data0$DaysInHospital), 1, NA))
+                    )
+  table(data0$someDays)
 
-  data = cbind( data, age.dummy.frame, sex.dummy.frame)
-  rm(age.dummy.frame, sex.dummy.frame)
-
-# remove redundant or innapropriate columns
-# skip MemberID, (Intercept), AgeAtFirstClaim, Sex, and Year
-  skipCols = c("Sex", "AgeAtFirstClaim", "(Intercept)","MemberID", "Year")
-  data= data[, !(names(data) %in% skipCols)]
-
-# Impute
-#   library(imputation)
-#   data.nn.i = kNNImpute(data.nn[1:100,], 1)
-
-# NAs..... Change na to 0 ... seems accurate thing to do
-  data = data[!is.na(data$DaysY3),]  # remove rows with missing target
-  data[is.na(data)] = 0
-
-# partition 
-  training.partition = createDataPartition(data[,"DaysY3"],
-                                           p=.8, list = FALSE) # 80% train
+# partition # 80% train
+  training.partition0 = createDataPartition(data0[,"DaysInHospital"],
+                                           p=.8, list = FALSE) 
 #   sample
-  sample.training = sample( training.partition, 2000, replace=FALSE)  
+  sample.training0 = sample( training.partition0, 2000, replace=FALSE)
+  t.all = table( data0[, "DaysInHospital"])
+  t.sample = table(data0[sample.training0, "DaysInHospital"])
+  t.sample
+  prop.table(t.sample)
+  prop.table(t.all)
+
 # all
-#   n = length(training.partition)
-#   sample.training = sample( training.partition, n, replace=FALSE)  
-# bootstrap
-#   sample.training = sample( training.partition, n, replace=TRUE)  
+  #   n = length(training.partition)
+  #   sample.training = sample( training.partition, n, replace=FALSE)  
+  # bootstrap
+  #   sample.training = sample( training.partition, n, replace=TRUE)  
 
 # select cols
-  training.cols = c(2:82) 
+  names(data0)
+  training.cols0 = c(3:90) 
 
 # scale
-  preProcValues <- preProcess(data[, training.cols], method = c("center", "scale") )
-#   data <- predict(preProcValues, data)
+  preProcValues0 <- preProcess(data0[, training.cols], method = c("center", "scale") )
 
-# set training and cv/test data
-  training = predict(preProcValues , data[sample.training, training.cols] ) 
-  training.target = data[sample.training, "DaysY3"] 
-  
-  test = predict(preProcValues , data[-sample.training, training.cols])
-  test.target = data[-sample.training, "DaysY3"]
-  
-  X = as.matrix(training)
-  y = as.matrix(training.target)
-  X.test = as.matrix(test[1:1000,])  # should try to randomize this with setseed/sample
-  y.test = as.matrix(test.target[1:1000])
+  # remove columns with zero variance
+  zero.var.cols0 = c("ProcedureGroup.SMCD", "ProcedureGroup.SO", 
+                    "PrimaryConditionGroup.PNCRDZ", "PrimaryConditionGroup.RENAL1", 
+                    "PrimaryConditionGroup.RENAL2", "PrimaryConditionGroup.SEPSIS")
+
+  # update training columns
+  nonZero.cols0 = setdiff(names(data0[,training.cols]), zero.var.cols0)
+
+  # set training and cv/test data
+  training0 = predict(preProcValues0 , data0[sample.training0, training.cols0] ) 
+  training0 = training0[, nonZero.cols0]
+  training0.target = data0[sample.training0, "someDays"] 
+  table(training0.target)
+
+  test0 = predict(preProcValues0 , data0[-sample.training0, training.cols0])
+  test0 = test0[, nonZero.cols0]
+  test0.target = data0[-sample.training0, "someDays"]
+  table(test0.target)
+
+  X = as.matrix(training0)
+  y = as.matrix(as.numeric(training0.target))
+  X.test = as.matrix(test0[1:1000,])  # should try to randomize this with setseed/sample
+  y.test = as.matrix(as.numeric(test0.target[1:1000]))
 
 # clear memory space
-  rm(data, training, training.target, test, test.target)
+  rm(data0, training0, training.target0, test0, test0.target)
   source("NgModel.R")
 
-layer.ms = 1 # c(1 , 3, 9 )
-lambdas = 10 #  c(0, .01, .16, 1.2, 10, 100)
+  layer.ms = 1 # c(1 , 3, 9 )
+  lambdas = c(0.1)
+  maxits = c(300)
 
 ## ===================== model0 X1
 ### 1st power feature set
 
-for (layer.m in layer.ms ){
-  for (l in lambdas){
-    model0.x1 =  nnNg(X.train= X, y.train= y,
-                     layer.size.mulitplier = layer.m,
-                     lambda = l,
-                     maxit = 100,
-                     X.cv= X.test ,
-                     y.cv= y.test,
-                     model = "X1")
-    
-    # add results to table
-    if ( is.na(models0)[1]){models0 = model0.x1} else {
-      models0 = rbind(models0, model0.x1$results) }
-    save(models0, file="models0.rda")
-  }}
-
-costVersusLambda( model0 = "X1", factor = 1)
-accurayVersusLambda( model0 = "X1", factor = 1)
+  for (layer.m in layer.ms ){
+    for (l in lambdas){
+      for (i in maxits){
+      model0.x1 =  nnNg(X.train= X, y.train= y,
+                       layer.size.mulitplier = layer.m,
+                       lambda = l,
+                       maxit = i,
+                       X.cv= X.test ,
+                       y.cv= y.test,
+                       model = "X1")
+      
+      # add results to table
+      if ( !exists("models0")){ load("models0.rda")} 
+      models0 = rbind(models0, model0.x1$results) 
+      save(models0, file="models0.rda")
+    }}}
+  
+  costVersusLambda( model = "X1", results = models0)
+  accurayVersusLambda( model = "X1", results = models0)
 
 ## ===================== model X2
 ### 2nd power feature set
@@ -109,19 +105,20 @@ X.test2 = cbind(X.test, X.test^2)
 
 for (layer.m in layer.ms ){
   for (l in lambdas){
+    for (i in maxits){
     model0.x2 =  nnNg(X.train= X2, y.train= y,
                      layer.size.mulitplier = layer.m,
                      lambda = l,
-                     maxit = 50,
+                     maxit = i,
                      X.cv= X.test2 ,
                      y.cv= y.test,
                      model = "X2")
     
     # add results to table
-    if ( is.na(models0)[1]){models0 = model0.x2} else {
+    if ( !exists("models0")){ models0 = model0.x2} else {
       models0 = rbind(models0, model0.x2) }
     save(models0, file="models0.rda")
-  }}
+  }}}
 
 costVersusLambda( model0 = "X2",  factor = 1)
 accurayVersusLambda( model0 = "X2",  factor = 1)
@@ -133,19 +130,20 @@ X.test3 = cbind(X.test2, X.test^3)+
   
   for (layer.m in layer.ms ){
     for (l in lambdas){
+      for (i in maxits){
     model0.x3 =  nnNg(X.train= X3, y.train= y,
                      layer.size.mulitplier = layer.m,
                      lambda = l,
-                     maxit = 50,
+                     maxit = i,
                      X.cv= X.test3 ,
                      y.cv= y.test,
-                     model0 = "X3")
+                     model = "X3")
     
     # add results to table
-    if ( is.na(models0)[1]){models0 = model0.x3} else {
+    if ( !exists("models0")){ models0 = model0.x3} else {
       models0 = rbind(models0, model0.x3) }
-    save(models0, file="models.rda")
-  }}
+    save(models0, file="models0.rda")
+  }}}
 
 costVersusLambda( model0 = "X3",  factor = 1)
 accurayVersusLambda( model0 = "X3",  factor = 1)
