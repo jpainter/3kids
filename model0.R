@@ -2,6 +2,7 @@
 library(caret)
 
 ## ==================== Data
+  rm(list=ls())
   load("dataY2.rda")
   data0 = dataY2
   rm(dataY2)
@@ -22,7 +23,7 @@ library(caret)
   training.partition0 = createDataPartition(data0[,"DaysInHospital"],
                                            p=.8, list = FALSE) 
 #   sample
-  sample.training0 = sample( training.partition0, 2000, replace=FALSE)
+  sample.training0 = sample( training.partition0, 10000, replace=FALSE)
   t.all = table( data0[, "DaysInHospital"])
   t.sample = table(data0[sample.training0, "DaysInHospital"])
   t.sample
@@ -37,10 +38,10 @@ library(caret)
 
 # select cols
   names(data0)
-  training.cols0 = c(3:90) 
+  training.cols0 = c(3:123) 
 
 # scale
-  preProcValues0 <- preProcess(data0[, training.cols], method = c("center", "scale") )
+  preProcValues0 <- preProcess(data0[, training.cols0], method = c("center", "scale") )
 
   # remove columns with zero variance
   zero.var.cols0 = c("ProcedureGroup.SMCD", "ProcedureGroup.SO", 
@@ -48,7 +49,7 @@ library(caret)
                     "PrimaryConditionGroup.RENAL2", "PrimaryConditionGroup.SEPSIS")
 
   # update training columns
-  nonZero.cols0 = setdiff(names(data0[,training.cols]), zero.var.cols0)
+  nonZero.cols0 = setdiff(names(data0[,training.cols0]), zero.var.cols0)
 
   # set training and cv/test data
   training0 = predict(preProcValues0 , data0[sample.training0, training.cols0] ) 
@@ -63,25 +64,25 @@ library(caret)
 
   X = as.matrix(training0)
   y = as.matrix(as.numeric(training0.target))
-  X.test = as.matrix(test0[1:1000,])  # should try to randomize this with setseed/sample
-  y.test = as.matrix(as.numeric(test0.target[1:1000]))
+  X.test = as.matrix(test0[1:2000,])  # should try to randomize this with setseed/sample
+  y.test = as.matrix(as.numeric(test0.target[1:2000]))
 
 # clear memory space
-  rm(data0, training0, training.target0, test0, test0.target)
+  rm(data0, training0, training0.target, test0, test0.target)
   source("NgModel.R")
 
-  layer.ms = 1 # c(1 , 3, 9 )
-  lambdas = c(0.1)
+  hidden.layer.sizes = round(ncol(X)/2) # seq(1, ncol(X), by=10)
+  lambdas = 1 # c(0, 0.1, 1, 10)
   maxits = c(300)
 
 ## ===================== model0 X1
 ### 1st power feature set
 
-  for (layer.m in layer.ms ){
+  for (h in hidden.layer.sizes ){
     for (l in lambdas){
       for (i in maxits){
       model0.x1 =  nnNg(X.train= X, y.train= y,
-                       layer.size.mulitplier = layer.m,
+                      hidden.layer.size = h,
                        lambda = l,
                        maxit = i,
                        X.cv= X.test ,

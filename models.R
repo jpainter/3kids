@@ -17,7 +17,7 @@ library(caret)
   training.partition = createDataPartition(data1[,"someDays"],
                                            p=.8, list = FALSE) 
 #   sample
-  sample.training1 = sample( training.partition, 3000, replace=FALSE)
+  sample.training1 = sample( training.partition, 10000, replace=FALSE)
   t.all = table( data1[, "someDays"])
   t.sample = table(data1[sample.training1, "someDays"])
   t.sample
@@ -70,32 +70,31 @@ library(caret)
   rm(data1, training1, training1.target, test1, test1.target)
   source("NgModel.R")
 
-  layer.ms = c(1,9) # c(1 , 3, 9 )
-  lambdas = c(0, 0.1, 1)
-  maxits = c(300)
+hidden.layer.sizes = ncol(X) # seq(1, ncol(X), by=10)
+lambdas = 0 # c(0, 0.1, 1, 10)
+maxits = c(300)
 
-
-## ===================== model X1
+## ===================== model0 X1
 ### 1st power feature set
-for (layer.m in layer.ms ){
-  for (l in lambdas){
-    for (i in maxits){
-    model.x1 =  nnNg(X.train= X, y.train= y,
-                     layer.size.mulitplier = layer.m,
-                     lambda = l,
-                     maxit = i,
-                     X.cv= X.test ,
-                     y.cv= y.test,
-                     model = "X1")
-    
-    # add results to table
-    if ( !exists("models")){ models = model.x1$results} else {
-      models = rbind(models, model.x1$results) }
-    save(models, file="models.rda")
-  }}}
 
-costVersusLambda(results = models, model = "X1", factor = 1)
-accurayVersusLambda(results = models, model = "X1", factor = 1)
+  for (h in hidden.layer.sizes ){
+    for (l in lambdas){
+      for (i in maxits){
+        model1.x1 =  nnNg(X.train= X, y.train= y,
+                          hidden.layer.size = h,
+                          lambda = l,
+                          maxit = i,
+                          X.cv= X.test ,
+                          y.cv= y.test,
+                          model = "X1")
+      # add results to table
+        if ( !exists("models1")){ load("models1.rda")} 
+        models1 = rbind(models1, model1.x1$results) 
+        save(models1, file="models1.rda")
+    }}}
+
+  costVersusLambda(results = models, model = "X1", factor = 1)
+  accurayVersusLambda(results = models, model = "X1", factor = 1)
 
   ## ===================== model X2
   ### 2nd power feature set

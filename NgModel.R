@@ -1,7 +1,7 @@
 
   nnNg <- function (X.train= X,
                     y.train= y,
-                    layer.size.mulitplier= 1, 
+                    hidden.layer.size= 10, 
                     lambda = 1, 
                     maxit = 1, 
                     X.cv= X.test , 
@@ -26,7 +26,7 @@
 #                                    maxit = maxit
 #                                    );
         test_cla <- nnet.train.cla(X = X.train, y = y.train, 
-                                   hidden_layer_size = layer.size.mulitplier * num.input,
+                                   hidden_layer_size = hidden.layer.size,
                                    lambda = lambda, 
                                    maxit = maxit
         );
@@ -34,8 +34,8 @@
     
         # populate results
         results$model = model
-        results$factor = layer.size.mulitplier
-        results$hidden = layer.size.mulitplier * num.input
+        results$factor = hidden.layer.size
+        results$hidden = hidden.layer.size
         results$lambda = lambda
         results$maxit = maxit
         results$time = test_cla[4]
@@ -57,7 +57,7 @@
         
         accuracy.cv = sum(pred_cla == y.cv)/length(pred_cla)*100
         cat("\nValidation Set Accuracy, model=", model, 
-            ", factor=", as.character(layer.size.mulitplier * num.input), 
+            ", factor=", as.character(hidden.layer.size), 
             ", lambda=", as.character(lambda), 
             ", maxit=", as.character(maxit),
             ": ", accuracy.cv ,
@@ -72,7 +72,7 @@
         nn_params = c(c(test_cla$Theta1), c(test_cla$Theta2));
         cost.cv <- costFunction.cla(nn_params = nn_params ,
                                      input_layer_size = ncol(X.cv),
-                                     hidden_layer_size = layer.m * num.input,
+                                     hidden_layer_size = hidden.layer.size,
                                      num_labels = length(levels(factor(y.test))),
                                      X = X.cv, y = y.cv, 
                                      lambda = lambda) 
