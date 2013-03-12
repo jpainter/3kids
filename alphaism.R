@@ -319,9 +319,11 @@ nnet.train.cla <- function(X, y, hidden_layer_size = 25,
   ## =============== return results ===============
   stop.time = Sys.time()
   print(stop.time)
+  t = difftime(stop.time, start.time, units="mins")
+  total.time = round(as.numeric(t), digits=1)
   
   return(list(Theta1 = Theta1, Theta2 = Theta2, pred = pred, 
-              time = stop.time-start.time,
+              time = total.time,
               cost = cost.cla,
               accuracy = accuracy ))
 

@@ -7,7 +7,7 @@
                     X.cv= X.test , 
                     y.cv= y.test, 
                     model = "test") {
-    
+        
         results = data.frame(model = NA, factor = NA, hidden = NA, lambda = NA, maxit = NA, 
                          cost = NA, cost.cv = NA, e = NA, e.cv = NA,
                          accuracy = NA, accuracy.cv = NA, 
