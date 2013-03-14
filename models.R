@@ -89,11 +89,11 @@ library(caret)
   test1.target = data1[-training.partition, "someDays"]
   table(test1.target)
 
-  X = as.matrix(training1)
-  y = as.matrix(as.numeric(training1.target))
-  X.test = as.matrix(test1)  
-  y.test = as.matrix(as.numeric(test1.target))
-  table(y.test)
+  X1 = as.matrix(training1)
+  y1 = as.matrix(as.numeric(training1.target))
+  X1.test = as.matrix(test1)  
+  y1.test = as.matrix(as.numeric(test1.target))
+  table(y1.test)
 
 # clear memory space
 #   rm(list= c("X","y","X.test", "y.test"))
@@ -107,15 +107,15 @@ library(caret)
 ## ===================== model0 X1
 ### 1st power feature set
 
-X2 = cbind(X, X^2)
-X2.test = cbind(X.test, X.test^2)
-X3 = cbind(X2, X^3)
-X3.test = cbind(X2.test, X.test^3)
+X1.2 = cbind(X1, X1^2)
+X1.2.test = cbind(X1.test, X1.test^2)
+X1.3 = cbind(X1.2, X1^3)
+X1.3.test = cbind(X1.2.test, X1.test^3)
 
   for (h in hidden.layer.sizes ){
     for (l in lambdas){
       for (i in maxits){
-        model1.x1 =  nnNg(X.train= X, y.train= y,
+        model1.x1 =  nnNg(X.train= X1, y.train= y1,
                           hidden.layer.size = h,
                           lambda = l,
                           maxit = i,
@@ -133,18 +133,18 @@ X3.test = cbind(X2.test, X.test^3)
 
 ## ===================== nnet
 library(caret)
-    Xy = as.data.frame(cbind(y, X))
-    Xcol.num = length(colnames(Xy))
-    colnames(Xy)[1] = "days"
-    Xy$days = factor(Xy$days)
-    Xvars = paste(colnames(Xy)[2:Xcol.num], collapse= " + ")
-    nn.formula = as.formula( paste("days ~ ", Xvars, sep=""))
+    Xy1 = as.data.frame(cbind(y1, X1))
+    Xcol.num1 = length(colnames(Xy1))
+    colnames(Xy1)[1] = "days"
+    Xy1$days = factor(Xy1$days)
+    Xvars1 = paste(colnames(Xy1)[2:Xcol.num1], collapse= " + ")
+    nn.formula1 = as.formula( paste("days ~ ", Xvars1, sep=""))
 
     start.time = Sys.time() ; start.time
       nn.grid <- expand.grid(.decay = c(1, 0.01), .size = c(5, 100))
       model1 = train(
-                    form = nn.formula,
-                    data = Xy,
+                    form = nn.formula1,
+                    data = Xy1,
                     method = "nnet",
                     tuneGrid = nn.grid, 
                     maxit = 10000,                    
@@ -160,9 +160,9 @@ library(caret)
     model1
     save(model1, file="model1.rda")    
 
-    model1.predict <- predict(model1, newdata = X.test)
-    table(model1.predict)
-    model1.e <- sqrt( mean( (log(as.numeric(model1.predict)) - log(as.numeric(y.test)) )^2 ))
+    model1.predict <- predict(model1, newdata = X1.test)
+    table(model1.predict, Xy1$days)
+    model1.e <- sqrt( mean( (log(as.numeric(model1.predict)) - log(as.numeric(y1.test)) )^2 ))
 
 
 
