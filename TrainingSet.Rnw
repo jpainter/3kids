@@ -1,0 +1,404 @@
+\documentclass{article}
+\usepackage[margin=1in]{geometry} % http://ctan.org/pkg/geometry
+%\usepackage{tabularx}% http://ctan.org/pkg/tabularx
+\usepackage{booktabs}% http://ctan.org/pkg/booktabs
+\usepackage{fixltx2e}
+\usepackage{setspace}
+\usepackage{relsize}
+\usepackage{booktabs} % for table formatting
+\usepackage[section]{placeins}  %% keeps output from floating into adjoining sections
+
+\begin{document}
+<<'setup', echo=FALSE, cache=FALSE, message=FALSE>>=
+opts_chunk$set(fig.align='center', fig.show='as.is', fig.width=6, fig.height=4,
+               message=FALSE, comment="", tidy=TRUE, 
+               echo=FALSE, 
+               results='asis',
+               cache=TRUE)
+library(xtable)
+library(tables)
+@
+
+\title{Training and Validation Data}
+\subtitle{Heritage Provider Network Health Prize}
+\author{John Painter (3kids)}
+\maketitle
+\tableofcontents          
+\listoffigures
+\listoftables
+
+\section{Dataset}
+
+<<'load'>>=
+load("members.rda")
+load("claims.rda")
+load("dihy2.rda")
+load("dihy3.rda")
+load("drug.rda")
+load("lab.rda")
+load("conditions.rda")
+load("procedures.rda")
+load("target.rda")
+@
+
+\section{Create Training Dataset}
+The first training set is created by joining dihy2 and dihy2 with members. This gives complete list of those with days in hospital (including those with no days) by Sex.
+
+\begin{itemize}
+     \item For lab and drug, calculate number of each per member by year
+     
+     \item join tables
+\end{itemize}
+
+<<'training-set'>>=
+# reshape drug and lab data to yield number of each per year per member
+## format data by member by year (i.e. norw ~= 3 x members)
+## insert rows in lab, claims, etc. when member exists but no value
+## when memeber exists in a year, but value for lab, or claims is NA, then set NA to 0
+
+  library(plyr)
+  library(caret)
+
+# hospital days (dihy) ======= 
+  
+  # outcome for predictors in Year1--days in hospital year 2
+  d1 = merge(members, dihy2, by.x='MemberID', by.y='MemberID')
+  d1 = d1[, c("MemberID", "ClaimsTruncated", "DaysInHospital")]
+  d1 = d1[d1$ClaimsTruncated==0,]  # remove those with claims truncated for y1
+  save(d1, file = "d1.rda")
+  paste("d1 has ", nrow(d1), " rows.")  
+
+  # outcome for predictors in Year1--days in hospital year 3
+  d2 = merge(members, dihy3, by.x='MemberID', by.y='MemberID')
+  d2 = d2[, c("MemberID", "ClaimsTruncated", "DaysInHospital")]
+  d2 = d2[d2$ClaimsTruncated==0,]  # remove those with claims truncated for y2
+  save(d2, file = "d2.rda")
+  paste("d2 has ", nrow(d2), " rows.")  
+
+  # outcome for predictors in Year3--the Target--days in hospital year 4
+  d3 = merge(members, target, by.x='MemberID', by.y='MemberID')
+  d3 = d3[, c("MemberID", "ClaimsTruncated", "DaysInHospital")]
+#   d1 = d1[d1$ClaimsTruncated==0,]  # remove those with claims truncated for y3
+  save(d3, file = "d3.rda")
+  paste("d3 has ", nrow(d3), " rows.")  
+
+# Age and Sex (dihy) ===== 
+
+# create dummy variables for Age, Sex
+  age.sex.dummy = dummyVars( ~ MemberID + AgeAtFirstClaim + Sex, data = members)
+  age.sex = as.data.frame(predict(age.sex.dummy, newdata = members))
+#   age.sex = data.frame(MemberID = members$MemberID, 
+#                        Age = factor(members$AgeAtFirstClaim), 
+#                        Sex = factor(members$Sex))
+  head(age.sex)
+  paste("The table age.sex has ", nrow(age.sex), " rows and ", ncol(age.sex), "columns." )
+
+  # individual years
+load("d1.rda")
+  age.sex1 = merge(age.sex, d1, all.y = TRUE)
+#   age.sex1 = age.sex1[order(age.sex1$MemberID), 1:13] # remove male (colinear with female)
+  save(age.sex1, file = "age.sex1.rda")
+  paste("The table age.sex1 has ", nrow(age.sex1), " rows and ", ncol(age.sex1), "columns." )
+
+load("d2.rda")
+  age.sex2 = merge(age.sex, d2, all.y = TRUE)
+#   age.sex2 = age.sex2[order(age.sex2$MemberID), 1:13] # remove male (colinear with female)
+  save(age.sex2, file = "age.sex2.rda")
+  paste("The table age.sex2 has ", nrow(age.sex2), " rows and ", ncol(age.sex2), "columns." )
+
+load("d3.rda")
+  age.sex3 = merge(age.sex, d3, all.y = TRUE)
+#   age.sex3 = age.sex3[order(age.sex3$MemberID), 1:13] # remove male (colinear with female)
+  save(age.sex3, file = "age.sex3.rda")
+  paste("The table age.sex3 has ", nrow(age.sex3), " rows and ", ncol(age.sex3), "columns." )
+ 
+# Claims (claim.matrix.sum) =======
+# # inintial training has yearly totals...
+# expand claims to matrix with indicators for procdeures and conditions ...
+  
+  rm(list=ls())
+  load("claims.rda")
+  claim.dummy = dummyVars( ~ MemberID  + 
+                                ProcedureGroup + 
+                                PrimaryConditionGroup +
+                                LengthOfStay + 
+                                Specialty + 
+                                PlaceSvc +
+                                CharlsonIndex, claims)
+
+  claim.matrix = predict(claim.dummy, newdata = claims)
+  claim.matrix = cbind(claim.matrix, claims$Year)
+  rm(claims)
+  colnames(claim.matrix)[length(colnames(claim.matrix))] = "Year"
+  
+# ===  Claims by year
+  claim.frame = as.data.frame(claim.matrix)
+  rm(claim.matrix)
+  claim.frame = claim.frame[order(claim.frame$MemberID),]; 
+  head(claim.frame[, c("MemberID", "Year")])
+  save(claim.frame, file = "claim.frame.rda")
+
+  claims.yr = ddply(claim.frame, .( MemberID, Year) , 
+                 .fun = function(x){
+                   data.frame(
+                     rowsum(x[,2:102], x$MemberID, na.rm=TRUE)
+                   )
+                   })
+
+  # === for speed, try for year 2 only
+  cfY2 = claim.frame$Year == 2
+  cf2 = claim.frame[cfY2,]
+
+  claims.yr2 = ddply(cf2, .( MemberID, Year) , 
+                 .fun = function(x){
+                   data.frame(
+                     rowsum(x[,2:102], x$MemberID, na.rm=TRUE)
+                   )
+                   })
+  nrow(claims.yr2)
+  claims.yr2 = claims.yr2[order(claims.yr2$MemberID),]; 
+  head(claims.yr2[, c("MemberID", "Year")])
+  save(claims.yr2, file="claims.yr2.rda")
+
+  # ==== year 3
+  cfY3 = claim.frame$Year == 3
+  cf3 = claim.frame[cfY3,]
+ 
+  claims.yr3 = ddply(cf3, .( MemberID, Year) , 
+                 .fun = function(x){
+                   data.frame(
+                     rowsum(x[,2:102], x$MemberID, na.rm=TRUE)
+                   )
+                   })
+  nrow(claims.yr3)
+  claims.yr3 = claims.yr3[order(claims.yr3$MemberID),]; 
+  head(claims.yr3[, c("MemberID", "Year")])
+  save(claims.yr3, file="claims.yr3.rda")
+  
+  rm(claim.frame)
+
+  # factor vars
+#       claims.factors = colnames(claims.yr)[-c(1,2)]
+#       for (i in 1:length(claims.factors)){
+#           claims.yr[, claims.factors[i]] = factor(claims.yr[, claims.factors[i]])
+#       }
+#       str(claims.yr)
+      save(claims.yr, file="claims.yr.rda")
+
+ # split by year, sum number of claims, combine
+
+  claim.year1 = which(claims.yr[, "Year"] == 1) 
+  claim.year2 = which(claims.yr[, "Year"] == 2)
+  claim.year3 = which(claims.yr[, "Year"] == 3)
+
+# === claims year 1
+
+  load("d1.rda")
+  claim1 = claims.yr[claim.year1,]
+  claim1.d = merge(claim1, d1, all.y = TRUE)
+  claim1 = claim1[order(claim1$MemberID), c(1,3:105)]  
+  claim1[is.na(claim1)] = 0
+  save(claim1, file="claim1.rda")
+  paste("The table claim1 has ", nrow(claim1), "and ", ncol(claim1), "columns." ) 
+ 
+
+# === claims year 2
+
+  load("d2.rda")
+  claim2 = merge(claims.yr2, d2, all.y = TRUE)
+  claim2 = claim2[order(claim2$MemberID), c(1,3:105)]  
+  claim2[is.na(claim2)] = 0
+  save(claim2, file="claim2.rda")
+  paste("The table claim2 has ", nrow(claim2), "and ", ncol(claim2), "columns." ) 
+
+
+# === claims year 3
+
+  load("d3.rda")
+  claim3 = merge(claims.yr3, d3, by.x = "MemberID", by.y = "MemberID", all.y = TRUE)
+
+# duplicates: 37668804 and 89874522
+  claim3 = claim3[-c(26822, 63767),]  # remove row -- but dont know why?
+
+  claim3 = claim3[order(claim3$MemberID), c(1,3:105)]  
+  claim3[is.na(claim3)] = 0
+  save(claim3, file="claim3.rda")
+  paste("The table claim3 has ", nrow(claim3), "and ", ncol(claim3), "columns." ) 
+  
+# Drug (drug.year) ====== 
+  #  subsequent versions should include inpatient/outpatient, type, etc.
+
+  # Form matrix for all years
+  load("drug.rda")
+  names(drug)[3] = "drugMonth"
+  drug.sum = ddply(drug, .(MemberID, Year), .fun=function(x){ 
+                    data.frame(
+                                months = nrow(x), 
+                                drug.months = sum(as.numeric(x$DrugCount)),
+                                drugs.mean = mean(as.numeric(x$DrugCount)),
+                                drug.sd = sd(as.numeric(x$DrugCount))
+                    )
+                   })
+  save(drug.sum, file="drug.sum.rda")
+  paste("The table drugsum has ", nrow(drug.sum), " rows and ", ncol(drug.sum), "columns." )
+
+  # individual drug years (merge with outcome data, change NA to zero, and sort by MemberID)
+
+  drug.year1 = drug.sum[which(drug.sum$Year %in% "Y1"), ]
+  load("d1.rda")
+  drug1 = merge(drug.year1, d1, all.y = TRUE)[,c(1,3:6)]
+  drug1 = drug1[order(drug1$MemberID),]  
+  drug1 = as.matrix(drug1)
+  drug1[is.na(drug1)] = 0
+  save(drug1, file = "drug1.rda")
+  paste("The table drug1 has ", nrow(drug1), " rows and ", ncol(drug1), "columns." )
+
+  drug.year2 = drug.sum[which(drug.sum$Year %in% "Y2"), ]
+  load("d2.rda")
+  drug2 = merge(drug.year2, d2, all.y = TRUE)[,c(1,3:6)]
+  drug2 = drug2[order(drug2$MemberID),]  
+  drug2 = as.matrix(drug2)
+  drug2[is.na(drug2)] = 0  
+  save(drug2, file = "drug2.rda")
+  paste("The table drug2 has ", nrow(drug2), " rows and ", ncol(drug2), "columns." )
+
+  drug.year3 = drug.sum[which(drug.sum$Year %in% "Y3"), ]
+  load("d3.rda")
+  drug3 = merge(drug.year3, d3, all.y = TRUE)[,c(1,3:6)]
+  drug3 = drug3[order(drug3$MemberID),]  
+  drug3 = as.matrix(drug3)
+  drug3[is.na(drug3)] = 0  
+  save(drug3, file = "drug3.rda")
+  paste("The table drug3 has ", nrow(drug3), " rows and ", ncol(drug3), "columns." )
+  
+# lab (lab.year) ====== 
+  # Form matrix for all years
+
+  load("lab.rda")
+  names(lab)[3] = "labMonth"
+  lab.sum = ddply(lab, .(MemberID, Year), .fun=function(x){ 
+                    data.frame(
+                                lab.months = nrow(x), 
+                                labs = sum(as.numeric(x$LabCount)),
+                                labs.mean = mean(as.numeric(x$LabCount)),
+                                lab.sd = sd(as.numeric(x$LabCount))
+                    )
+                   })
+  save(lab.sum, file = "lab.sum.rda")
+  paste("The table lab.sum has ", nrow(lab.sum), " rows and ", ncol(lab.sum), "columns." )
+
+  # individual lab years
+  lab.year1 = lab.sum[which(lab.sum$Year %in% "Y1"), ]
+  load("d1.rda")
+  lab1 = merge(lab.year1, d1, all.y = TRUE)[,c(1,3:6)]
+  lab1 = lab1[order(lab1$MemberID),]  
+  lab1 = as.matrix(lab1)
+  lab1[is.na(lab1)] = 0
+  save(lab1, file = "lab1.rda")
+  paste("The table lab1 has ", nrow(lab1), " rows and ", ncol(lab1), "columns." )
+
+  lab.year2 = lab.sum[which(lab.sum$Year %in% "Y2"), ]
+  load("d2.rda")
+  lab2 = merge(lab.year2, d2, all.y = TRUE)[,c(1,3:6)]
+  lab2 = lab2[order(lab2$MemberID),]  
+  lab2 = as.matrix(lab2)
+  lab2[is.na(lab2)] = 0
+  save(lab2, file = "lab2.rda")
+  paste("The table lab2 has ", nrow(lab2), " rows and ", ncol(lab2), "columns." )
+
+  lab.year3 = lab.sum[which(lab.sum$Year %in% "Y3"), ]
+  load("d3.rda")
+  lab3 = merge(lab.year3, d3, all.y = TRUE)[,c(1,3:6)]
+  lab3 = lab3[order(lab3$MemberID),]  
+  lab3 = as.matrix(lab3)
+  lab3[is.na(lab3)] = 0
+  save(lab3, file = "lab3.rda")
+  paste("The table lab3 has ", nrow(lab3), " rows and ", ncol(lab3), "columns." )
+  
+# Assemble data ... ========= 
+
+  rm(list=ls())
+
+===  # YEAR 2 predictors with year3 outcome ===
+  load("d2.rda"); load("claim2.rda"); load("lab2.rda"); load("drug2.rda"); load("age.sex2.rda")
+  
+  # confirm matrices in same order
+  dim(d2)
+  sum(d2[,1] == claim2[,1])
+  sum(lab2[,1] == d2[,1])
+  sum(drug2[,1] == d2[,1])
+  sum(age.sex2[,1] == d2[,1])
+  
+  # Data set for predicting Year 3 outcome (e.g. claimsY2); initially ignore data from Y1
+  # mem.cols = c("DaysY3" , "MemberID", "DaysY2", "AgeAtFirstClaim", "Sex", "drugY2", "labY2")
+  
+  dataY2 = cbind(d2[,c(1,3)], 
+                 age.sex2[,2:ncol(age.sex2)], 
+                 claim2[,2:ncol(claim2)], 
+                 lab2[,2:ncol(lab2)], 
+                 drug2[,2:ncol(drug2)])
+  dataY2 = dataY2[order(dataY2$MemberID),]
+
+# rename columns to remove weird characters and spaces
+  cn = colnames(dataY2) 
+  library(stringr)
+  cn = str_replace_all(cn, "[^[:alnum:]]" , "."); cn
+  colnames(dataY2) = cn
+
+# reveiw data
+  library(tables) # divide columns into three groups; ignore memberID
+  vars1 = paste("Factor(", cn[2:round(length(cn)/2)], ") ", collapse=" + ", sep="")
+  vars2 = paste("Factor(", cn[round(length(cn)/2):(2*round(length(cn)/3))], ") ", collapse=" + ", sep="")
+  vars3 = paste("Factor(", cn[(2*round(length(cn)/3)):length(cn)], ") ", collapse=" + ", sep="")
+
+  table.formula1 = as.formula(paste( vars1, " ~ 1"))
+  table.formula2 = as.formula(paste( vars2, " ~ 1"))
+  table.formula3 = as.formula(paste( vars3, " ~ 1"))
+
+  tabular(table.formula1, data = dataY2)
+  tabular(table.formula2, data = dataY2)
+  tabular(table.formula3, data = dataY2)
+
+  save(dataY2, file="dataY2.rda")
+  str(dataY2)
+
+
+===  # YEAR 3 predictors for TARGET outcome ===
+  load("target.rda"); load("d3.rda"); load("claim3.rda"); load("lab3.rda"); load("drug3.rda"); load("age.sex3.rda")
+  
+  # confirm matrices in same order
+  dim(d3)
+  sum(d3[,1] == claim3[,1])
+  sum(lab3[,1] == d3[,1])
+  sum(drug3[,1] == d3[,1])
+  sum(age.sex3[,1] == d3[,1])
+  
+  # Data set for predicting Year 3 outcome (e.g. claimsY2); initially ignore data from Y1
+  # mem.cols = c("DaysY3" , "MemberID", "DaysY2", "AgeAtFirstClaim", "Sex", "drugY2", "labY2")
+  
+  dataY3 = cbind(d3[,c(1,3)], 
+                 age.sex3[,2:ncol(age.sex3)], 
+                 claim3[,2:ncol(claim3)], 
+                 lab3[,2:ncol(lab3)], 
+                 drug3[,2:ncol(drug3)])
+  dataY3 = dataY3[order(dataY3$MemberID),]
+
+  target = target[order(target$MemberID),]
+  sum(dataY3$MemberID == target$MemberID)
+
+# rename columns to remove weird characters and spaces
+  cn = colnames(dataY3) 
+  library(stringr)
+  cn = str_replace_all(cn, "[^[:alnum:]]" , "."); cn
+  colnames(dataY3) = cn
+
+  save(dataY3, file="dataY3.rda")
+  str(dataY3)
+@
+
+
+
+
+\end{document}
+
+
