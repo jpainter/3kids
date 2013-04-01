@@ -2,11 +2,6 @@
 library(caret)
   rm(list=ls())
 
-# Parallize
-  library(doParallel)
-  registerDoParallel(cores=4)
-  getDoParWorkers()
-
 # data
   load("dataY2.rda")
   data0 = dataY2[, c(2:15,18:118,121:128)]
@@ -14,57 +9,117 @@ library(caret)
   sum(names(data0) == make.names(names(data0), unique = TRUE, allow_ = FALSE))
   rm(dataY2)
 
-# outcome
-  data0$someDays = factor(
-    ifelse(data0$DaysInHospital==0 & !is.na(data0$DaysInHospital), 0,
-           ifelse(!is.na(data0$DaysInHospital), 1, NA))
-  )
-#   data0$someDays = 
-#     ifelse(data0$DaysInHospital==0 & !is.na(data0$DaysInHospital), 0,
-#            ifelse(!is.na(data0$DaysInHospital), 1, NA))
+# Factor DaysInHospital
+  data0$someDays = cut(data0$DaysInHospital, breaks=c(0,1,16),
+                       labels=c("d0", "d1"),
+                          ordered_result = TRUE, right=FALSE
+                    )
   table(data0$someDays)
 
-# partition # 80% train
-  training.partition0 = createDataPartition(data0[,"someDays"],
-                                          p=.7, list = FALSE) 
-  table(data0[training.partition0, "someDays"])
+  y = data0$someDays
+  X = data0[, 2:(ncol(data0)-1)] # remove DaysInHospital and someDays
+  rm(data0)
 
-  X = data0[training.partition0, 2:(ncol(data0)-1)]
-  y = data0[training.partition0, "someDays"]
+# pca
+  nzv = nearZeroVar(X)
+  if (length(nzv)>0){Xnzv = X[,-nzv2]} else {Xnzv=X}
+  colnames(Xnzv)
+    
+# preprocess
+  prePCA <- preProcess(Xnzv, method = c("center","scale","pca"))
+  PCA = predict(prePCA,  Xnzv)
+  preRange <- preProcess(PCA, method = c("range"))
+  Range = predict(preRange,  PCA)
+  summary(Range)
 
-  X.test = data0[-training.partition0, 2:(ncol(data0)-1)]
-  y.test = data0[-training.partition0, "someDays"]
+# formula
+  f = formula( ~ .*.)
+  dv = dummyVars(f, Range)
+  dvf = predict(dv, newdata = Range)
+  colnames(dvf) = make.names(colnames(dvf), unique = TRUE, allow_ = FALSE)
+  colnames(dvf)
 
-# nnet
+# preprocess, again!
+  nzv2 = nearZeroVar(dvf)
+  if (length(nzv2)>0){Xnzv2 = dvf[,-nzv2]} else {Xnzv2=dvf}
+  colnames(Xnzv2)
+  prePCA2 <- preProcess(Xnzv2, method = c("center","scale","pca"))
+  PCA2 = predict(prePCA2,  Xnzv2)
+  preRange2 <- preProcess(PCA2, method = c("range"))
+  Range2 = predict(preRange2,  PCA2)
+  summary(Range2)
+
+# data sets
+  Xy = as.data.frame(Range2) # as.data.frame(df)
+  Xy$y = y
+  str(Xy)
+  save(Xy, file="Xy.rda")
+
+# ======  end preprocess
+
+  rm(list=ls())
+  load("Xy.rda")
+# training index
+  training.partition = createDataPartition(Xy[,"y"],
+                                          p=.8, list = FALSE) 
+
+  train.data = Xy[training.partition,]
+  table(train.data[, "y"])
+
+  X.test = Xy[-training.partition, ]
+  y.test =  Xy[-training.partition,"y"]
+  table(y.test)
+
+# start
+start.time = Sys.time() ; start.time
   
-  nnet.grid = expand.grid(
-    .decay=c(0, 0.01, 0.03, 0.1, 0.3, 1), 
-    .size=c(1, 3, 10, 30, 100))
+# Parallize
+  library(doParallel)
+#   registerDoParallel(cores=4)
+  registerDoSEQ()
+  getDoParWorkers()
 
-  neural.grid = expand.grid(.layer1=c(10), .layer2=c(0), .layer3=0)
-  
-  start.time = Sys.time() ; start.time
   model0 = train(
-                someDays ~ .,
-                data = data0[training.partition0[], c(2:124) ], 
+                y ~ .,
+                data = train.data, 
                 method = "nnet",
-                preProcess = c("ica"),
-                tuneGrid = nnet.grid ,
+#                 preProcess = c("range"),
                 trControl = trainControl(
                   method = "cv",
-                  number = 3,
+                  number = 10,
                   repeats = 1,
-                  predictionBounds = c(0,1),
+#                   predictionBounds = c(0,1),
                   allowParallel = TRUE
                   ),
-                threshold = 0.01,
-                stepmax = 1e+06,
+                threshold = 0.001,
+                stepmax = 1e+04,
                 rep = 1, 
-                err.fct = "ce", 
-                linear.output = FALSE ,
-                lifesign = 'full',
-                lifesign.step = 2000)
-  stop.time = Sys.time() 
+                # ==== neural net options 
+#                 tuneGrid = expand.grid(.layer1=1, .layer2=1, .layer3=1) ,
+#                 algorithm = "rprop+",
+#                 threshold = 0.001,
+#                 stepmax = 1e+06,
+# #                 err.fct="ce", 
+#                 linear.ouput = TRUE, 
+#                 lifesign = 'full',
+#                 lifesign.step = 2000,
+#                 hidden = c(10,0,0)
+#                 
+                # nnet options   ===== 
+               tuneGrid = expand.grid(
+                 .decay= c(.01, 1) , #c(0, 0.01, 0.03, 0.1, 0.3, 1), 
+                 .size= c(10, 30)  #c(1, 3, 10, 30, 100) )
+               ),
+#                 entropy = TRUE,
+                linout = FALSE,
+                # softmax = FALSE,
+                maxit = 1e+04,
+                MaxNWts = 100000,
+                trace = TRUE,
+                verboseIter = TRUE
+                )
+# stop
+stop.time = Sys.time() 
 
 # time
   stop.time
@@ -74,16 +129,17 @@ library(caret)
 
 # summary
   model0
-  model0.predict <- predict(model0, X.test )
-  pred0=ifelse(model0.predict>=0.5,1,0)
-  pred0r = round(model0.predict)
-  table(pred0, pred0r)
-  confusionMatrix(pred0 , y.test, positive="1")
+  model0.predict <- predict(model0, X.test, type="raw")
+  summary(model0.predict )
+
+# ======
+  confusionMatrix(model0.predict , y.test, positive="d1")
   plot(model0)
 
 # save
   save(model0, file="model0.rda")    
 
+# =====
 print(net <- neuralnet(formula = someDays ~ AgeAtFirstClaim. + AgeAtFirstClaim.0.9 + 
                          AgeAtFirstClaim.10.19 + AgeAtFirstClaim.20.29 + AgeAtFirstClaim.30.39 + 
                          AgeAtFirstClaim.40.49 + AgeAtFirstClaim.50.59 + AgeAtFirstClaim.60.69 + 
