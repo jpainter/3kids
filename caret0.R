@@ -21,15 +21,15 @@ library(caret)
   rm(data0)
 
 # pca
-  nzv = nearZeroVar(X)
-  if (length(nzv)>0){Xnzv = X[,-nzv2]} else {Xnzv=X}
+  nzv0 = nearZeroVar(X)
+  if (length(nzv0)>0){Xnzv = X[,-nzv0]} else {Xnzv=X}
   colnames(Xnzv)
     
 # preprocess
-  prePCA <- preProcess(Xnzv, method = c("center","scale","pca"))
-  PCA = predict(prePCA,  Xnzv)
-  preRange <- preProcess(PCA, method = c("range"))
-  Range = predict(preRange,  PCA)
+  prePCA0 <- preProcess(Xnzv, method = c("center","scale","pca"))
+  PCA = predict(prePCA0,  Xnzv)
+  preRange0 <- preProcess(PCA, method = c("range"))
+  Range = predict(preRange0,  PCA)
   summary(Range)
 
 # formula
@@ -40,20 +40,24 @@ library(caret)
   colnames(dvf)
 
 # preprocess, again!
-  nzv2 = nearZeroVar(dvf)
-  if (length(nzv2)>0){Xnzv2 = dvf[,-nzv2]} else {Xnzv2=dvf}
+  nzv20 = nearZeroVar(dvf)
+  if (length(nzv20)>0){Xnzv2 = dvf[,-nzv20]} else {Xnzv2=dvf}
   colnames(Xnzv2)
-  prePCA2 <- preProcess(Xnzv2, method = c("center","scale","pca"))
-  PCA2 = predict(prePCA2,  Xnzv2)
-  preRange2 <- preProcess(PCA2, method = c("range"))
-  Range2 = predict(preRange2,  PCA2)
+  prePCA20 <- preProcess(Xnzv2, method = c("center","scale","pca"))
+  PCA2 = predict(prePCA20,  Xnzv2)
+  preRange20 <- preProcess(PCA2, method = c("range"))
+  Range2 = predict(preRange20,  PCA2)
   summary(Range2)
+
+  process0 = list(nzv0, prePCA0, preRange0, nzv20, prePCA20, preRange20)
+  save(process0, file = "process0.rda")
 
 # data sets
   Xy = as.data.frame(Range2) # as.data.frame(df)
   Xy$y = y
   str(Xy)
   save(Xy, file="Xy.rda")
+  
 
 # ======  end preprocess
 
@@ -64,21 +68,29 @@ library(caret)
                                           p=.8, list = FALSE) 
 
   train.data = Xy[training.partition,]
+  # Sample, if you will
+  #   train.data = train.data[sample(nrow(train.data), 1000),]
+    index=NA
+    for ( i in 0:15){
+      sd = which(train.data$y==paste("d",i, sep=""))[1:3000]
+      index = c(index[!is.na(index)], sd[!is.na(sd)])     
+    }
+    train.data = train.data[index,]
+
   table(train.data[, "y"])
 
   X.test = Xy[-training.partition, ]
   y.test =  Xy[-training.partition,"y"]
   table(y.test)
-
-# start
-start.time = Sys.time() ; start.time
   
 # Parallize
-  library(doParallel)
-#   registerDoParallel(cores=4)
-  registerDoSEQ()
-  getDoParWorkers()
+#   library(doParallel)
+# #   registerDoParallel(cores=4)
+#   registerDoSEQ()
+#   getDoParWorkers()
 
+# start
+  start.time = Sys.time() ; start.time
   model0 = train(
                 y ~ .,
                 data = train.data, 
@@ -86,29 +98,18 @@ start.time = Sys.time() ; start.time
 #                 preProcess = c("range"),
                 trControl = trainControl(
                   method = "cv",
-                  number = 10,
-                  repeats = 1,
+                  number = 2,
+                  repeats = 0,
 #                   predictionBounds = c(0,1),
                   allowParallel = TRUE
                   ),
                 threshold = 0.001,
                 stepmax = 1e+04,
-                rep = 1, 
-                # ==== neural net options 
-#                 tuneGrid = expand.grid(.layer1=1, .layer2=1, .layer3=1) ,
-#                 algorithm = "rprop+",
-#                 threshold = 0.001,
-#                 stepmax = 1e+06,
-# #                 err.fct="ce", 
-#                 linear.ouput = TRUE, 
-#                 lifesign = 'full',
-#                 lifesign.step = 2000,
-#                 hidden = c(10,0,0)
-#                 
+                rep = 1,     
                 # nnet options   ===== 
                tuneGrid = expand.grid(
-                 .decay= c(.01, 1) , #c(0, 0.01, 0.03, 0.1, 0.3, 1), 
-                 .size= c(10, 30)  #c(1, 3, 10, 30, 100) )
+                 .decay= c(.01) , #c(0, 0.01, 0.03, 0.1, 0.3, 1), 
+                 .size= c(33,66)  #c(1, 3, 10, 30, 100) )
                ),
 #                 entropy = TRUE,
                 linout = FALSE,
@@ -129,6 +130,7 @@ stop.time = Sys.time()
 
 # summary
   model0
+  table(predict(model0, type="raw"))
   model0.predict <- predict(model0, X.test, type="raw")
   summary(model0.predict )
 
@@ -138,21 +140,6 @@ stop.time = Sys.time()
 
 # save
   save(model0, file="model0.rda")    
-
-# =====
-print(net <- neuralnet(formula = someDays ~ AgeAtFirstClaim. + AgeAtFirstClaim.0.9 + 
-                         AgeAtFirstClaim.10.19 + AgeAtFirstClaim.20.29 + AgeAtFirstClaim.30.39 + 
-                         AgeAtFirstClaim.40.49 + AgeAtFirstClaim.50.59 + AgeAtFirstClaim.60.69 + 
-                         AgeAtFirstClaim.70.79 + AgeAtFirstClaim.80. + Sex. + Sex.F + Sex.M + 
-                         ProcedureGroup. + ProcedureGroup.ANES , 
-                       data = data0[training.partition0, c(2:16, 124)], 
-                       hidden=10,
-                       rep=1, 
-                       stepmax = 10000, 
-                       err.fct="ce", 
-                       linear.output=FALSE,
-                       lifesign = 'minimal',
-                       lifesign.step = 10))
 
 
 

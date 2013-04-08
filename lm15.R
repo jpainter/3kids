@@ -1,6 +1,4 @@
 
-
-library(caret)
 rm(list=ls())
 
 
@@ -21,6 +19,7 @@ rm(list=ls())
   table(data15$someDays)
 
 # partition # 80% train
+  library(caret)
   training.partition15 = createDataPartition(data15[,"someDays"],
                                              p=.8, list = FALSE) 
   table(data15[training.partition15, "someDays"])
@@ -41,7 +40,7 @@ rm(list=ls())
   getDoParWorkers()
 
   lm15 = glm(someDays ~ . , 
-             data=data15[training.partition15, 2:ncol(data15)], 
+             data=data15[sample(training.partition15[], 10000), 2:ncol(data15)], 
              family="binomial")
 
     stop.time = Sys.time() ; stop.time
@@ -57,4 +56,25 @@ rm(list=ls())
 
 # caret alternatives
   library(caret)
+  start.time = Sys.time() ; start.time
+  model15 = train(
+    someDays ~ .,
+    data = data15[sample(training.partition15[], 1000), c(2:124) ], 
+    preProcess = c("BoxCox"),
+    model = "multinom"
+  )
+  stop.time = Sys.time() 
   
+  # time
+  stop.time
+  t = difftime(stop.time, start.time, units="mins")
+  total.time = round(as.numeric(t), digits=1)
+  paste("total training time was ", total.time, " minutes")
+  
+  # summary
+  model15
+  plot(model15)
+  model15.predict <- predict(model15, X.test )
+  table(model15.predict)
+  confusionMatrix(model15.predict , y.test, positive="1")
+

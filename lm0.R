@@ -38,8 +38,10 @@ library(caret)
 
 # ==== LM ====
     start.time = Sys.time() ; start.time
-  lm0 = glm(someDays ~ .*. , data=data0[training.partition0, 2:ncol(data0)], family="binomial")
+  lm0 = glm(someDays ~ .*. , 
+            data=data0[sample(training.partition0, 1000), 100:ncol(data0)], family="binomial")
     stop.time = Sys.time() ; stop.time
+
     t = difftime(stop.time, start.time, units="mins")
     total.time = round(as.numeric(t), digits=1)
   paste("total training time was ", total.time, " minutes")
